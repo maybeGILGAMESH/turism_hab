@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Северный Кавказ - Распознавание",
+    "slug": "north-caucasus-recognition",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#667eea"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rudn.northcaucasus"
+    },
+    "android": {
+      "package": "com.rudn.northcaucasus",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#667eea"
+      }
+    }
+  }
+}
+

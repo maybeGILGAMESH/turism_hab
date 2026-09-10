@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  metro-app:
+    build: .
+    container_name: moscow-metro-app
+    ports:
+      - "8000:8000"   # Backend API
+      - "8501:8501"   # Streamlit frontend
+      - "8080:8080"   # HTML frontend
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./uploads:/app/uploads
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - metro-network
+
+networks:
+  metro-network:
+    driver: bridge

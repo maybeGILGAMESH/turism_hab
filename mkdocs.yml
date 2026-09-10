@@ -1,0 +1,48 @@
+site_name: Moscow Metro Cultural Heritage Recognition System
+site_description: AI-powered system for identifying cultural heritage objects in Moscow Metro stations
+
+site_author: frznfrgg
+site_url: https://frznfrgg.github.io/sbermetro
+
+repo_name: frznfrgg/sbermetro
+repo_url: https://github.com/frznfrgg/sbermetro
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - footnotes
+  - meta
+  - pymdownx.emoji
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.smartsymbols
+  - pymdownx.superfences
+  - pymdownx.tasklist
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started/index.md
+  - API Reference:
+    - Overview: api/index.md
+    - FastAPI App: api/app.md
+    - RAG Searcher: api/rag_searcher.md
+    - Frontend: api/frontend.md
+  - User Guide: user-guide/index.md
+  - Development: development/index.md
+  - Deployment: deployment/index.md
