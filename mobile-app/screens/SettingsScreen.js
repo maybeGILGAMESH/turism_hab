@@ -11,7 +11,7 @@ import {
 import { StorageService } from '../services/StorageService';
 
 export default function SettingsScreen({ apiUrl, onSettingsChange }) {
-  const [serverUrl, setServerUrl] = useState(apiUrl || 'http://192.168.0.102:8000');
+  const [serverUrl, setServerUrl] = useState(apiUrl || 'http://localhost:8000');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -104,7 +104,7 @@ export default function SettingsScreen({ apiUrl, onSettingsChange }) {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>⚙️ Настройки</Text>
-        <Text style={styles.subtitle}>Факультет Искусственного Интеллекта РУДН</Text>
+        <Text style={styles.subtitle}>Открой Хабаровский край</Text>
       </View>
 
       <View style={styles.section}>
@@ -135,13 +135,13 @@ export default function SettingsScreen({ apiUrl, onSettingsChange }) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>О приложении</Text>
         <Text style={styles.aboutText}>
-          Приложение для распознавания туристических достопримечательностей Северного Кавказа
+          Потребительский AI-гид по достопримечательностям Хабаровского края
         </Text>
         <Text style={styles.aboutText}>
-          Версия: 1.0.0
+          Версия: 2.0.0
         </Text>
         <Text style={styles.aboutText}>
-          Факультет Искусственного Интеллекта РУДН
+          Данные о местах сопровождаются сведениями об источниках и условиях доступа.
         </Text>
       </View>
     </ScrollView>
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   header: {
-    backgroundColor: '#667eea',
+    backgroundColor: '#075985',
     padding: 20,
     paddingTop: 40,
   },
@@ -228,4 +228,3 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 });
-

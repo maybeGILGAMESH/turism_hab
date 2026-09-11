@@ -1,120 +1,27 @@
-name: Continuous Integration
-
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-
+name: CI
+on: [push, pull_request]
 jobs:
-  # Lint and format check
-  lint:
+  python:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install flake8 black isort mypy
-
-      - name: Check code formatting with black
-        run: |
-          black --check --diff .
-
-      - name: Check import sorting with isort
-        run: |
-          isort --check-only --diff .
-
-      - name: Lint with flake8
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
-
-      - name: Type check with mypy
-        run: |
-          mypy rag_searcher.py app.py frontend.py --ignore-missing-imports
-
-  # Test application
-  test:
+          python-version: 3.11.16
+      - run: uv sync --extra data --extra ui --group dev
+      - run: uv run ruff check .
+      - run: uv run python -m pytest
+  mobile:
     runs-on: ubuntu-latest
-    needs: lint
+    defaults:
+      run:
+        working-directory: mobile-app
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
-
-      - name: Run tests
-        run: |
-          pytest --cov=. --cov-report=xml --cov-report=html
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-  # Build Docker image
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        run: |
-          docker build -t moscow-metro-app:test .
-
-      - name: Test Docker image
-        run: |
-          docker run --rm moscow-metro-app:test python -c "print('Docker image test successful')"
-
-  # Security scan
-  security:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install safety
-        run: |
-          python -m pip install --upgrade pip
-          pip install safety
-
-      - name: Run safety check
-        run: |
-          safety check --json --output safety-report.json || true
-
-      - name: Upload safety report
-        uses: actions/upload-artifact@v3
-        with:
-          name: safety-report
-          path: safety-report.json
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile-app/package-lock.json
+      - run: npm ci
+      - run: npx expo export --platform web

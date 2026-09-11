@@ -1,23 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet, Text, View, StatusBar } from 'react-native';
+import { Text, StatusBar, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import CameraScreen from './screens/CameraScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import QueueScreen from './screens/QueueScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import ExploreScreen from './screens/ExploreScreen';
 import { RequestQueue } from './services/RequestQueue';
 import { StorageService } from './services/StorageService';
 
 const Tab = createBottomTabNavigator();
 
-// API_BASE_URL настраивается через Settings экран в приложении
-// По умолчанию используем IP вашего компьютера (замените на ваш IP!)
-// Узнать IP: ifconfig (Linux/Mac) или ipconfig (Windows)
-const DEFAULT_API_BASE_URL = 'http://192.168.0.102:8000'; // ⚠️ ЗАМЕНИТЕ НА IP ВАШЕГО СЕРВЕРА!
+const DEFAULT_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ||
+  (Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000');
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(true);
@@ -91,10 +89,10 @@ export default function App() {
       <StatusBar barStyle="dark-content" />
       <Tab.Navigator
         screenOptions={{
-          tabBarActiveTintColor: '#667eea',
+          tabBarActiveTintColor: '#0369a1',
           tabBarInactiveTintColor: '#666',
           headerStyle: {
-            backgroundColor: '#667eea',
+            backgroundColor: '#075985',
           },
           headerTintColor: '#fff',
           headerTitleStyle: {
@@ -117,6 +115,12 @@ export default function App() {
               onQueueUpdate={loadQueueCount}
             />
           )}
+        </Tab.Screen>
+        <Tab.Screen
+          name="Explore"
+          options={{ title: 'Места', tabBarIcon: () => <Text style={{ fontSize: 24 }}>🗺️</Text> }}
+        >
+          {props => <ExploreScreen {...props} apiUrl={apiUrl} />}
         </Tab.Screen>
         <Tab.Screen
           name="History"
@@ -158,13 +162,3 @@ export default function App() {
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
-

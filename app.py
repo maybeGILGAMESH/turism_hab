@@ -1,137 +1,156 @@
-"""
-FastAPI application for North Caucasus Tourist Attractions Recognition System.
+from __future__ import annotations
 
-This module provides a REST API for recognizing tourist attractions in North Caucasus,
-managing user accounts, storing recognition history, and planning travel routes.
-
-Факультет Искусственного Интеллекта РУДН
-"""
-
-from fastapi import (
-    FastAPI,
-    File,
-    UploadFile,
-    HTTPException,
-    Form,
-    Depends,
-    Header,
-)
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import uvicorn
-import os
-import json
-import shutil
+import csv
 import hashlib
-import uuid
-import re
 import math
-from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
+import mimetypes
+import secrets
+import tempfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from threading import Lock
+from typing import Annotated
 
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Float,
-    ForeignKey,
-    Text,
-    create_engine,
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, select
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
-from sqlalchemy.exc import IntegrityError
 
-from pydantic import BaseModel, Field
+from build_index import build as build_faiss_index
+from catalog import Attraction, load_catalog, save_catalog
+from data_pipeline import Manifest, assign_splits
+from rag_searcher import IndexNotReady, RAGSearcher
+from settings import ROOT, Settings, get_settings
 
-from rag_searcher import RAGSearcher
+settings: Settings = get_settings()
+for folder in (
+    ROOT / "runtime",
+    ROOT / "uploads",
+    ROOT / "dataset" / "processed",
+    ROOT / "artifacts",
+):
+    folder.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# Database configuration
-# ---------------------------------------------------------------------------
-DATABASE_URL = "sqlite:///users.db"
 
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}, pool_pre_ping=True
-)
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 
 class User(Base):
     __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(100), unique=True, nullable=False, index=True)
-    password_hash = Column(String(128), nullable=False)
-    role = Column(String(20), default="user", nullable=False)
-    token = Column(String(64), unique=True, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    recognized_images = relationship(
-        "RecognizedImage", back_populates="user", cascade="all, delete-orphan"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(512))
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    recognitions: Mapped[list[Recognition]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 
-class RecognizedImage(Base):
-    __tablename__ = "recognized_images"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    object_id = Column(Integer, nullable=False)
-    distance = Column(Float, nullable=False)
-    confidence = Column(Float, nullable=False)
-    image_path = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    user = relationship("User", back_populates="recognized_images")
+class SessionToken(Base):
+    __tablename__ = "session_tokens"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-Base.metadata.create_all(bind=engine)
+class Recognition(Base):
+    __tablename__ = "recognitions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    object_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    image_url: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    user: Mapped[User] = relationship(back_populates="recognitions")
 
 
-# ---------------------------------------------------------------------------
-# Pydantic schemas
-# ---------------------------------------------------------------------------
+database_url = settings.database_url
+if database_url.startswith("sqlite:///runtime/"):
+    database_url = f"sqlite:///{(ROOT / database_url.removeprefix('sqlite:///')).as_posix()}"
+engine = create_engine(
+    database_url,
+    connect_args={"check_same_thread": False} if database_url.startswith("sqlite") else {},
+)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+Base.metadata.create_all(engine)
+password_hasher = PasswordHasher()
+
+
+def bootstrap_admin() -> None:
+    with SessionLocal() as db:
+        existing = db.scalar(select(User).where(User.email == settings.admin_email.lower()))
+        if existing is None:
+            db.add(
+                User(
+                    email=settings.admin_email.lower(),
+                    password_hash=password_hasher.hash(settings.admin_password),
+                    is_admin=True,
+                )
+            )
+            db.commit()
+
+
+bootstrap_admin()
+searcher = RAGSearcher(settings)
+index_state: dict[str, object] = {"running": False, "error": "", "finished_at": None}
+index_lock = Lock()
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version="2.0.0",
+    description="Распознавание и каталог достопримечательностей Хабаровского края",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.mount("/dataset", StaticFiles(directory=ROOT / "dataset" / "processed"), name="dataset")
+app.mount("/uploads", StaticFiles(directory=ROOT / "uploads"), name="uploads")
+
+
 class UserCreate(BaseModel):
-    username: str
-    password: str
-    role: str = Field("user", description="user или admin")
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
 
 
 class UserLogin(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 
-class TokenResponse(BaseModel):
-    success: bool
-    token: str
-    username: str
-    role: str
-
-
-class RecognizedImageOut(BaseModel):
-    id: int
-    object_id: int
-    distance: float
-    confidence: float
-    description: Optional[str]
-    image_url: Optional[str]
-    created_at: datetime
-
-
 class RouteRequest(BaseModel):
-    latitude: float
-    longitude: float
-    limit: int = Field(10, ge=1, le=30)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    limit: int = Field(default=10, ge=1, le=20)
 
 
-# ---------------------------------------------------------------------------
-# Utility helpers
-# ---------------------------------------------------------------------------
-def get_db() -> Session:
+def get_db():
     db = SessionLocal()
     try:
         yield db
@@ -139,770 +158,463 @@ def get_db() -> Session:
         db.close()
 
 
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def token_hash(token: str) -> str:
+    return hashlib.sha256(f"{settings.app_secret}:{token}".encode()).hexdigest()
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    return hash_password(password) == password_hash
-
-
-def create_token() -> str:
-    return uuid.uuid4().hex
-
-
-def extract_token(authorization: Optional[str]) -> Optional[str]:
-    if not authorization:
+def bearer_token(authorization: str | None) -> str | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
         return None
-    if authorization.lower().startswith("bearer "):
-        return authorization[7:].strip()
-    return authorization.strip()
+    return authorization.split(" ", 1)[1].strip()
 
 
-def get_user_by_token(db: Session, token: Optional[str]) -> Optional[User]:
+def current_user(db: Session, authorization: str | None) -> User | None:
+    token = bearer_token(authorization)
     if not token:
         return None
-    return db.query(User).filter(User.token == token).first()
-
-
-def require_authenticated_user(
-    db: Session, authorization: Optional[str]
-) -> User:
-    token = extract_token(authorization)
-    user = get_user_by_token(db, token)
-    if not user:
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-    return user
-
-
-def require_admin(db: Session, authorization: Optional[str]) -> User:
-    user = require_authenticated_user(db, authorization)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Недостаточно прав для операции")
-    return user
-
-
-def collect_example_images(obj_id: int, limit: int = 3) -> List[str]:
-    images: List[str] = []
-    dataset_root = "dataset"
-    folder_prefix = f"{obj_id:02d}_"
-
-    if not os.path.exists(dataset_root):
-        return images
-
-    target_folder = None
-    for folder in os.listdir(dataset_root):
-        folder_path = os.path.join(dataset_root, folder)
-        if os.path.isdir(folder_path) and folder.startswith(folder_prefix):
-            target_folder = folder
-            break
-
-    if not target_folder:
-        return images
-
-    folder_path = os.path.join(dataset_root, target_folder)
-
-    def append_images(directory: str, max_items: int) -> None:
-        if not os.path.exists(directory):
-            return
-        for file in sorted(os.listdir(directory)):
-            if len(images) >= max_items:
-                break
-            file_path = os.path.join(directory, file)
-            if os.path.isfile(file_path) and file.lower().endswith((".jpg", ".jpeg")):
-                relative = os.path.relpath(file_path, dataset_root).replace("\\", "/")
-                images.append(relative)
-
-    append_images(folder_path, limit)
-    ground_path = os.path.join(folder_path, "ground")
-    append_images(ground_path, limit)
-
-    return images[:limit]
-
-
-def compose_description(obj: Dict[str, Any]) -> str:
-    description = f"Название: {obj.get('Название', '')}\n"
-    description += f"Местоположение: {obj.get('Местоположение', '')}\n"
-    description += "\nКраткая историческая справка:\n"
-    description += obj.get("Краткая историческая справка", "")
-    return description
-
-
-def parse_dms_component(value: str) -> Optional[float]:
-    match = re.match(
-        r"^\s*(?P<deg>-?\d+)[°º]?\s*(?P<min>\d+)?[′'’]?\s*(?P<sec>\d+)?[\"″]?\s*(?P<dir>[NSEW])\s*$",
-        value,
-        flags=re.IGNORECASE,
-    )
-    if not match:
+    row = db.scalar(select(SessionToken).where(SessionToken.token_hash == token_hash(token)))
+    if row is None:
         return None
-    deg = int(match.group("deg"))
-    minutes = int(match.group("min") or 0)
-    seconds = int(match.group("sec") or 0)
-    result = abs(deg) + minutes / 60.0 + seconds / 3600.0
-    direction = match.group("dir").upper()
-    if direction in {"S", "W"}:
-        result = -result
+    expiry = row.expires_at.replace(tzinfo=UTC) if row.expires_at.tzinfo is None else row.expires_at
+    if expiry <= datetime.now(UTC):
+        db.delete(row)
+        db.commit()
+        return None
+    return db.get(User, row.user_id)
+
+
+def require_user(
+    authorization: Annotated[str | None, Header()] = None, db: Session = Depends(get_db)
+) -> User:
+    user = current_user(db, authorization)
+    if user is None:
+        raise HTTPException(401, "Требуется авторизация")
+    return user
+
+
+def require_admin(
+    authorization: Annotated[str | None, Header()] = None, db: Session = Depends(get_db)
+) -> User:
+    user = current_user(db, authorization)
+    if user is None or not user.is_admin:
+        raise HTTPException(403, "Требуются права администратора")
+    return user
+
+
+def catalog_map() -> dict[int, Attraction]:
+    return {
+        item.id: item
+        for item in load_catalog(settings.absolute(settings.catalog_path))
+        if item.enabled
+    }
+
+
+def examples_by_object() -> dict[int, list[str]]:
+    manifest_path = settings.absolute(settings.manifest_path)
+    result: dict[int, list[str]] = {}
+    if not manifest_path.exists():
+        return result
+    with manifest_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if row.get("status") != "accepted" or not row.get("processed_path"):
+                continue
+            object_id = int(row["object_id"])
+            if object_id <= 0 or len(result.setdefault(object_id, [])) >= 3:
+                continue
+            relative = Path(row["processed_path"])
+            try:
+                image_relative = relative.relative_to("dataset/processed")
+            except ValueError:
+                continue
+            result[object_id].append(f"/dataset/{image_relative.as_posix()}")
     return result
 
 
-def parse_coordinates(raw_location: str) -> Optional[Tuple[float, float]]:
-    if not raw_location:
-        return None
-
-    decimal_matches = re.findall(r"[-+]?\d+\.\d+", raw_location.replace(",", "."))
-    if len(decimal_matches) >= 2:
-        try:
-            lat = float(decimal_matches[0])
-            lon = float(decimal_matches[1])
-            return lat, lon
-        except ValueError:
-            pass
-
-    # Attempt to capture DMS patterns
-    dms_matches = re.findall(
-        r"(\d+[°º]\s*\d*[′'’]?\s*\d*[\"″]?\s*[NSEW])", raw_location, flags=re.IGNORECASE
+def public_object(
+    item: Attraction, examples: dict[int, list[str]] | None = None
+) -> dict[str, object]:
+    payload = item.model_dump(exclude={"search_queries"})
+    ready_ids = {int(value) for value in searcher.metadata.get("ready_object_ids", [])}
+    payload["index_status"] = (
+        "ready" if searcher.ready and item.id in ready_ids else "pending_index"
     )
-    if len(dms_matches) >= 2:
-        lat = parse_dms_component(dms_matches[0])
-        lon = parse_dms_component(dms_matches[1])
-        if lat is not None and lon is not None:
-            return lat, lon
-
-    return None
-
-
-def load_object_entries() -> List[Dict[str, Any]]:
-    if not os.path.exists("artifacts_turism/turism.json"):
-        return []
-
-    with open("artifacts_turism/turism.json", "r", encoding="utf-8") as f:
-        objects: List[Dict[str, Any]] = json.load(f)
-
-    entries: List[Dict[str, Any]] = []
-    for obj in objects:
-        obj_id = obj.get("id")
-        location = obj.get("Местоположение", "")
-        coordinates = parse_coordinates(location)
-        example_images = collect_example_images(obj_id)
-
-        entry = {
-            "id": obj_id,
-            "name": obj.get("Название", f"Достопримечательность {obj_id}"),
-            "description": compose_description(obj),
-            "location": location,
-            "image_count": len(example_images),
-            "example_images": example_images,
-            "coordinates": {
-                "latitude": coordinates[0],
-                "longitude": coordinates[1],
-            }
-            if coordinates
-            else None,
-            "raw": obj,
-        }
-        entries.append(entry)
-    return entries
+    payload["coordinates"] = (
+        {"latitude": item.latitude, "longitude": item.longitude}
+        if item.latitude is not None and item.longitude is not None
+        else None
+    )
+    payload["example_images"] = (examples or {}).get(item.id, [])
+    payload["image_count"] = len(payload["example_images"])
+    return payload
 
 
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def haversine(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
     radius = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
+    dlat, dlon = math.radians(b_lat - a_lat), math.radians(b_lon - a_lon)
+    value = (
         math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
+        + math.cos(math.radians(a_lat)) * math.cos(math.radians(b_lat)) * math.sin(dlon / 2) ** 2
     )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return radius * c
+    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
 
-def build_route(
-    start_lat: float, start_lon: float, candidates: List[Dict[str, Any]], limit: int
-) -> Tuple[List[Dict[str, Any]], float]:
-    with_coordinates = [
-        c for c in candidates if c.get("coordinates") is not None
-    ]
-    if not with_coordinates:
-        return [], 0.0
-
-    # Greedy nearest neighbor path
-    remaining = with_coordinates.copy()
-    route: List[Dict[str, Any]] = []
-    current_lat = start_lat
-    current_lon = start_lon
-    cumulative_distance = 0.0
-
-    for _ in range(min(limit, len(remaining))):
-        nearest = min(
-            remaining,
-            key=lambda c: haversine_km(
-                current_lat,
-                current_lon,
-                c["coordinates"]["latitude"],
-                c["coordinates"]["longitude"],
-            ),
-        )
-        distance = haversine_km(
-            current_lat,
-            current_lon,
-            nearest["coordinates"]["latitude"],
-            nearest["coordinates"]["longitude"],
-        )
-        cumulative_distance += distance
-        route.append(
-            {
-                "id": nearest["id"],
-                "name": nearest["name"],
-                "location": nearest["location"],
-                "description": nearest["description"],
-                "example_images": nearest["example_images"],
-                "coordinates": nearest["coordinates"],
-                "distance_from_previous_km": round(distance, 3),
-                "cumulative_distance_km": round(cumulative_distance, 3),
-            }
-        )
-        current_lat = nearest["coordinates"]["latitude"]
-        current_lon = nearest["coordinates"]["longitude"]
-        remaining.remove(nearest)
-
-    return route, cumulative_distance
-
-
-def ensure_directories() -> None:
-    os.makedirs("uploads", exist_ok=True)
-    os.makedirs("uploads/users", exist_ok=True)
-    os.makedirs("pool/recognized", exist_ok=True)
-
-
-def store_recognition_for_user(
-    db: Session,
-    user: User,
-    object_id: int,
-    distance: float,
-    confidence: float,
-    description: Optional[str],
-    temp_path: str,
-) -> RecognizedImage:
-    user_dir = os.path.join("uploads", "users", f"user_{user.id}")
-    os.makedirs(user_dir, exist_ok=True)
-
-    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_obj_{object_id:02d}.jpg"
-    destination = os.path.join(user_dir, filename)
-    shutil.copy2(temp_path, destination)
-
-    relative_path = os.path.relpath(destination, "uploads").replace("\\", "/")
-
-    record = RecognizedImage(
-        user_id=user.id,
-        object_id=object_id,
-        distance=distance,
-        confidence=confidence,
-        description=description,
-        image_path=relative_path,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record
-
-
-# ---------------------------------------------------------------------------
-# FastAPI application and configuration
-# ---------------------------------------------------------------------------
-app = FastAPI(
-    title="API распознавания туристических достопримечательностей Северного Кавказа",
-    description=(
-        "ИИ-система для идентификации достопримечательностей Северного Кавказа, "
-        "управления пользователями и планирования маршрутов. "
-        "Факультет Искусственного Интеллекта РУДН."
-    ),
-    version="1.1.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Initialize RAG searcher
-try:
-    ragger: Optional[RAGSearcher] = RAGSearcher(
-        device="cpu",
-        vectorstore_path="artifacts/db",
-        object_descr_path="artifacts_turism/turism.json",
-        similarity_threshold=0.90,
-    )
-    print("✅ RAG searcher initialized successfully")
-except Exception as e:
-    print(f"❌ Error initializing RAG searcher: {e}")
-    ragger = None
-
-# Prepare filesystem
-ensure_directories()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/dataset", StaticFiles(directory="dataset"), name="dataset")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-
-# ---------------------------------------------------------------------------
-# API endpoints
-# ---------------------------------------------------------------------------
-@app.get("/")
-async def root() -> Dict[str, Any]:
-    return {
-        "message": "API распознавания туристических достопримечательностей Северного Кавказа",
-        "version": "1.1.0",
-        "status": "running",
-        "organization": "Факультет Искусственного Интеллекта РУДН",
-        "endpoints": {
-            "recognize": "POST /api/recognize",
-            "objects": "GET /api/objects",
-            "plan_route": "POST /api/plan-route",
-            "stats": "GET /api/stats",
-            "register": "POST /auth/register",
-            "login": "POST /auth/login",
-            "me": "GET /auth/me",
-        },
-    }
+@app.get("/", include_in_schema=False)
+def root():
+    return FileResponse(ROOT / "static" / "index.html")
 
 
 @app.post("/auth/register")
-def register_user(user: UserCreate, db: Session = Depends(get_db)) -> Dict[str, Any]:
-    username = user.username.strip()
-    role = user.role.lower().strip()
-
-    if len(username) < 3:
-        raise HTTPException(status_code=400, detail="Имя пользователя должно содержать минимум 3 символа")
-    if len(user.password) < 6:
-        raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 6 символов")
-    if role not in {"user", "admin"}:
-        raise HTTPException(status_code=400, detail="Некорректная роль. Допустимо: user или admin")
-
-    if db.query(User).filter(User.username == username).first():
-        raise HTTPException(status_code=400, detail="Пользователь с таким именем уже существует")
-
-    db_user = User(username=username, password_hash=hash_password(user.password), role=role)
-    db.add(db_user)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Не удалось создать пользователя")
-    db.refresh(db_user)
-
-    return {
-        "success": True,
-        "message": "Пользователь успешно зарегистрирован",
-        "username": db_user.username,
-        "role": db_user.role,
-    }
-
-
-@app.post("/auth/login", response_model=TokenResponse)
-def login_user(user: UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.username == user.username.strip()).first()
-    if not db_user or not verify_password(user.password, db_user.password_hash):
-        raise HTTPException(status_code=401, detail="Неверное имя пользователя или пароль")
-
-    db_user.token = create_token()
+def register(payload: UserCreate, db: Session = Depends(get_db)):
+    email = payload.email.lower()
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(409, "Пользователь уже существует")
+    user = User(email=email, password_hash=password_hasher.hash(payload.password), is_admin=False)
+    db.add(user)
     db.commit()
-    return TokenResponse(
-        success=True,
-        token=db_user.token,
-        username=db_user.username,
-        role=db_user.role,
+    db.refresh(user)
+    return {"success": True, "user": {"id": user.id, "email": user.email, "role": "user"}}
+
+
+@app.post("/auth/login")
+def login(payload: UserLogin, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    if user is None:
+        raise HTTPException(401, "Неверные учётные данные")
+    try:
+        password_hasher.verify(user.password_hash, payload.password)
+    except VerifyMismatchError as error:
+        raise HTTPException(401, "Неверные учётные данные") from error
+    raw = secrets.token_urlsafe(32)
+    db.add(
+        SessionToken(
+            token_hash=token_hash(raw),
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        )
     )
+    db.commit()
+    return {
+        "access_token": raw,
+        "token_type": "bearer",
+        "expires_in": 604800,
+        "role": "admin" if user.is_admin else "user",
+    }
 
 
 @app.post("/auth/logout")
-def logout_user(
-    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    user = require_authenticated_user(db, authorization)
-    user.token = None
-    db.commit()
-    return {"success": True, "message": "Вы успешно вышли из системы"}
+def logout(authorization: Annotated[str | None, Header()] = None, db: Session = Depends(get_db)):
+    token = bearer_token(authorization)
+    if token:
+        row = db.scalar(select(SessionToken).where(SessionToken.token_hash == token_hash(token)))
+        if row:
+            db.delete(row)
+            db.commit()
+    return {"success": True}
 
 
 @app.get("/auth/me")
-def get_current_user(
-    authorization: Optional[str] = Header(None), db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    user = require_authenticated_user(db, authorization)
-    return {
-        "success": True,
-        "username": user.username,
-        "role": user.role,
-        "created_at": user.created_at.isoformat(),
-    }
+def me(user: User = Depends(require_user)):
+    return {"id": user.id, "email": user.email, "role": "admin" if user.is_admin else "user"}
 
 
-@app.get("/auth/me/recognized", response_model=List[RecognizedImageOut])
-def get_recognition_history(
-    limit: int = 50,
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-):
-    user = require_authenticated_user(db, authorization)
-    records = (
-        db.query(RecognizedImage)
-        .filter(RecognizedImage.user_id == user.id)
-        .order_by(RecognizedImage.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-
-    response: List[RecognizedImageOut] = []
-    for record in records:
-        image_url = None
-        if record.image_path:
-            image_url = f"/uploads/{record.image_path}"
-        response.append(
-            RecognizedImageOut(
-                id=record.id,
-                object_id=record.object_id,
-                distance=record.distance,
-                confidence=record.confidence,
-                description=record.description,
-                image_url=image_url,
-                created_at=record.created_at,
-            )
-        )
-    return response
-
-
-@app.post("/api/recognize")
-async def recognize_object(
-    file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    if not ragger:
-        raise HTTPException(status_code=500, detail="RAG searcher not initialized")
-    
-    if not file:
-        raise HTTPException(status_code=400, detail="Файл не загружен")
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Файл должен быть изображением")
-    if file.size and file.size > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Файл слишком большой. Максимальный размер 10MB")
-    
-    temp_path: Optional[str] = None
-    user: Optional[User] = None
-    token = extract_token(authorization)
-    if token:
-        user = get_user_by_token(db, token)
-
-    try:
-        temp_path = f"uploads/temp_{uuid.uuid4()}.jpg"
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-            raise HTTPException(status_code=400, detail="Не удалось сохранить загруженный файл")
-        
-        result = ragger.search(temp_path)
-        
-        if result is None:
-            return {
-                "success": False,
-                "message": (
-                    "Похоже, вы загрузили изображение не из базы туристических достопримечательностей "
-                    "Северного Кавказа. Пожалуйста, попробуйте другой ракурс или другое изображение."
-                ),
-                "confidence": 0.0,
-                "object_id": None,
-                "description": None,
-                "distance": None,
-            }
-
-        object_id, distance = result
-        distance = float(distance)
-        confidence = max(0.0, 1.0 - (distance / 0.9))
-
-        description = None
-        try:
-            description = ragger.get_description(object_id)
-        except Exception as e:
-            print(f"Error getting description for object {object_id}: {e}")
-
-        saved_pool_path = None
-        if distance < 0.5:
-            try:
-                saved_pool_path = (
-                    f"pool/recognized/obj_{object_id:02d}_dist_{distance:.4f}_"
-                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                )
-                shutil.copy2(temp_path, saved_pool_path)
-                print(f"✅ Saved well-recognized image to pool: {saved_pool_path} (distance: {distance:.4f})")
-            except Exception as pool_error:
-                print(f"⚠️ Could not save to pool: {pool_error}")
-
-        history_entry = None
-        if user and description:
-            record = store_recognition_for_user(
-                db=db,
-                user=user,
-                object_id=int(object_id),
-                distance=distance,
-                confidence=confidence,
-                description=description,
-                temp_path=temp_path,
-            )
-            history_entry = {
-                "id": record.id,
-                "object_id": record.object_id,
-                "distance": record.distance,
-                "confidence": record.confidence,
-                "description": record.description,
-                "image_url": f"/uploads/{record.image_path}",
-                "created_at": record.created_at.isoformat(),
-            }
-
-        response = {
-            "success": True,
-            "message": "Туристическая достопримечательность успешно распознана",
-            "confidence": round(confidence, 3),
-            "object_id": int(object_id),
-            "description": description,
-            "distance": round(distance, 4),
+@app.get("/auth/me/recognized")
+def history(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    rows = db.scalars(
+        select(Recognition)
+        .where(Recognition.user_id == user.id)
+        .order_by(Recognition.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "object_id": row.object_id,
+            "object_name": row.object_name,
+            "confidence": row.confidence,
+            "image_url": row.image_url,
+            "created_at": row.created_at,
         }
-        if history_entry:
-            response["history_entry"] = history_entry
-        if saved_pool_path:
-            response["saved_pool_image"] = saved_pool_path
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Recognition error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Распознавание не удалось: {str(e)}")
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception as cleanup_error:
-                print(f"Warning: Failed to clean up temp file {temp_path}: {cleanup_error}")
+        for row in rows
+    ]
 
 
 @app.get("/api/objects")
-async def get_objects() -> Dict[str, Any]:
-    try:
-        entries = load_object_entries()
-        formatted = []
-        for entry in entries:
-            payload = {
-                "id": entry["id"],
-                "name": entry["name"],
-                "description": entry["description"],
-                "location": entry["location"],
-                "image_count": entry["image_count"],
-                "example_images": entry["example_images"],
-            }
-            if entry["coordinates"]:
-                payload["coordinates"] = entry["coordinates"]
-            formatted.append(payload)
-        return {"success": True, "objects": formatted}
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Файл с объектами не найден")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Ошибка чтения файла с объектами")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось получить объекты: {str(e)}")
-
-
-@app.post("/api/objects")
-async def add_object(
-    name: str = Form(...),
-    description: str = Form(...),
-    location: str = Form(""),
-    images: List[UploadFile] = File(...),
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    require_admin(db, authorization)
-
-    try:
-        objects = []
-        if os.path.exists("artifacts_turism/turism.json"):
-            with open("artifacts_turism/turism.json", "r", encoding="utf-8") as f:
-                objects = json.load(f)
-
-        new_id = max([obj.get("id", 0) for obj in objects]) + 1 if objects else 1
-
-        safe_name = re.sub(r"[^A-Za-z0-9_]+", "_", name.strip()) or f"object_{new_id}"
-        dataset_folder = os.path.join("dataset", f"{new_id:02d}_{safe_name}")
-        os.makedirs(dataset_folder, exist_ok=True)
-
-        image_paths: List[str] = []
-        for i, image in enumerate(images, start=1):
-            if not image.content_type or not image.content_type.startswith("image/"):
-                continue
-            ext = os.path.splitext(image.filename or "")[1].lower()
-            if ext not in {".jpg", ".jpeg", ".png"}:
-                ext = ".jpg"
-            filename = f"photo_{i}{ext}"
-            destination = os.path.join(dataset_folder, filename)
-            with open(destination, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
-            image_paths.append(destination)
-
-        new_object = {
-            "id": new_id,
-            "Название": name,
-            "Местоположение": location,
-            "Краткая историческая справка": description,
-            "created_at": datetime.now().isoformat(),
-        }
-        objects.append(new_object)
-
-        with open("artifacts_turism/turism.json", "w", encoding="utf-8") as f:
-            json.dump(objects, f, ensure_ascii=False, indent=2)
-        
-        return {
-            "success": True,
-            "message": "Объект успешно добавлен",
-            "object": new_object,
-            "images_saved": len(image_paths),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось добавить объект: {str(e)}")
-
-
-@app.put("/api/objects/{object_id}")
-async def edit_object(
-    object_id: int,
-    name: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    location: Optional[str] = Form(None),
-    authorization: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    require_admin(db, authorization)
-
-    try:
-        if not os.path.exists("artifacts_turism/turism.json"):
-            raise HTTPException(status_code=404, detail="База объектов не найдена")
-
-        with open("artifacts_turism/turism.json", "r", encoding="utf-8") as f:
-            objects = json.load(f)
-
-        obj_index = None
-        for idx, obj in enumerate(objects):
-            if obj.get("id") == object_id:
-                obj_index = idx
-                break
-
-        if obj_index is None:
-            raise HTTPException(status_code=404, detail="Объект не найден")
-        
-        if name:
-            objects[obj_index]["Название"] = name
-        if description:
-            objects[obj_index]["Краткая историческая справка"] = description
-        if location is not None:
-            objects[obj_index]["Местоположение"] = location
-        objects[obj_index]["updated_at"] = datetime.now().isoformat()
-        
-        with open("artifacts_turism/turism.json", "w", encoding="utf-8") as f:
-            json.dump(objects, f, ensure_ascii=False, indent=2)
-        
-        return {
-            "success": True,
-            "message": "Объект успешно обновлен",
-            "object_id": object_id,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось обновить объект: {str(e)}")
-
-
-@app.post("/api/plan-route")
-async def plan_route(request: RouteRequest) -> Dict[str, Any]:
-    try:
-        entries = load_object_entries()
-        route, total_distance = build_route(
-            start_lat=request.latitude,
-            start_lon=request.longitude,
-            candidates=entries,
-            limit=request.limit,
-        )
-
-        if not route:
-            return {
-                "success": False,
-                "message": "Не удалось построить маршрут: нет объектов с координатами",
-                "route": [],
-            }
-
-        return {
-            "success": True,
-            "start": {
-                "latitude": request.latitude,
-                "longitude": request.longitude,
-            },
-            "total_distance_km": round(total_distance, 3),
-            "points": route,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось построить маршрут: {str(e)}")
-
-
-@app.get("/api/stats")
-async def get_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    try:
-        entries = load_object_entries()
-        total_images = 0
-        if os.path.exists("dataset"):
-            for folder in sorted(os.listdir("dataset")):
-                folder_path = os.path.join("dataset", folder)
-                if os.path.isdir(folder_path):
-                    for file in os.listdir(folder_path):
-                        file_path = os.path.join(folder_path, file)
-                        if os.path.isfile(file_path) and file.lower().endswith((".jpg", ".jpeg")):
-                            total_images += 1
-                    ground_path = os.path.join(folder_path, "ground")
-                    if os.path.exists(ground_path) and os.path.isdir(ground_path):
-                        for file in os.listdir(ground_path):
-                            if file.lower().endswith((".jpg", ".jpeg")):
-                                total_images += 1
-
-        user_count = db.query(User).count()
-        recognized_count = db.query(RecognizedImage).count()
-        
-        return {
-            "success": True,
-            "stats": {
-                "total_objects": len(entries),
-                "total_images": total_images,
-                "recognized_records": recognized_count,
-                "total_users": user_count,
-                "system_status": "operational" if ragger else "error",
-                "last_updated": datetime.now().isoformat(),
-                "organization": "Факультет Искусственного Интеллекта РУДН",
-                "database": "turism.json",
-            },
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Не удалось получить статистику: {str(e)}")
-
-
-@app.get("/health")
-async def health_check() -> Dict[str, Any]:
+def get_objects():
+    examples = examples_by_object()
     return {
-        "status": "healthy",
-        "rag_searcher": "initialized" if ragger else "error",
-        "timestamp": datetime.now().isoformat(),
+        "success": True,
+        "objects": [public_object(item, examples) for item in catalog_map().values()],
     }
 
 
+@app.post("/api/recognize")
+async def recognize(
+    file: UploadFile = File(...),
+    authorization: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+):
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(415, "Поддерживаются JPEG, PNG и WebP")
+    content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"Максимальный размер файла — {settings.max_upload_mb} МБ")
+    suffix = mimetypes.guess_extension(file.content_type) or ".jpg"
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix, dir=ROOT / "runtime"
+        ) as handle:
+            handle.write(content)
+            temp_path = Path(handle.name)
+        with Image.open(temp_path) as probe:
+            probe.verify()
+        result = searcher.search(temp_path)
+    except UnidentifiedImageError as error:
+        raise HTTPException(400, "Файл не является корректным изображением") from error
+    except IndexNotReady as error:
+        raise HTTPException(503, f"Индекс не готов: {error}") from error
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+    attraction = result.pop("object")
+    payload = {
+        "success": bool(result["recognized"]),
+        "recognized": bool(result["recognized"]),
+        "object_id": attraction.id if attraction else None,
+        "confidence": max(0.0, min(1.0, float(result["score"]))) if attraction else 0.0,
+        "description": attraction.description if attraction else "Объект не распознан уверенно.",
+        "object": public_object(attraction) if attraction else None,
+        "top_matches": result["candidates"],
+        "score": result["score"],
+        "margin": result["margin"],
+        "model_version": result["model_version"],
+        "dataset_version": result["dataset_version"],
+    }
+    user = current_user(db, authorization)
+    if user:
+        user_dir = ROOT / "uploads" / f"user_{user.id}"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        stored = user_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}{suffix}"
+        stored.write_bytes(content)
+        db.add(
+            Recognition(
+                user_id=user.id,
+                object_id=attraction.id if attraction else None,
+                object_name=attraction.name if attraction else None,
+                confidence=float(payload["confidence"]),
+                image_url=f"/uploads/user_{user.id}/{stored.name}",
+            )
+        )
+        db.commit()
+    return payload
+
+
+@app.post("/api/plan-route")
+def plan_route(request: RouteRequest):
+    remaining = [
+        item
+        for item in catalog_map().values()
+        if item.latitude is not None and item.longitude is not None
+    ]
+    route = []
+    current_lat, current_lon = request.latitude, request.longitude
+    total = 0.0
+    while remaining and len(route) < request.limit:
+        nearest = min(
+            remaining,
+            key=lambda item: haversine(current_lat, current_lon, item.latitude, item.longitude),
+        )
+        distance = haversine(current_lat, current_lon, nearest.latitude, nearest.longitude)
+        route.append({**public_object(nearest), "distance_from_previous_km": round(distance, 2)})
+        total += distance
+        current_lat, current_lon = nearest.latitude, nearest.longitude
+        remaining.remove(nearest)
+    return {
+        "success": bool(route),
+        "start": request.model_dump(exclude={"limit"}),
+        "route": route,
+        "total_distance_km": round(total, 2),
+    }
+
+
+@app.post("/api/objects", dependencies=[Depends(require_admin)])
+async def add_object(
+    name: str = Form(...),
+    description: str = Form(...),
+    category: str = Form("other"),
+    municipality: str = Form(...),
+    address: str = Form(""),
+    latitude: float | None = Form(None),
+    longitude: float | None = Form(None),
+    images: list[UploadFile] = File(...),
+):
+    objects = load_catalog(settings.absolute(settings.catalog_path))
+    new_id = max(item.id for item in objects) + 1
+    slug = "object-" + str(new_id)
+    item = Attraction(
+        id=new_id,
+        slug=slug,
+        name=name,
+        category=category,
+        municipality=municipality,
+        address=address,
+        latitude=latitude,
+        longitude=longitude,
+        description=description,
+        access_notes="",
+        source_urls=[],
+        search_queries=[],
+        enabled=True,
+        index_status="pending_index",
+    )
+    manifest = Manifest(settings.absolute(settings.manifest_path))
+    target_dir = ROOT / "dataset" / "processed" / f"{new_id:03d}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    for upload in images:
+        content = await upload.read(settings.max_upload_mb * 1024 * 1024 + 1)
+        try:
+            import io
+
+            with Image.open(io.BytesIO(content)) as opened:
+                image = ImageOps.exif_transpose(opened).convert("RGB")
+            digest = hashlib.sha256(content).hexdigest()
+            path = target_dir / f"{digest}.jpg"
+            image.thumbnail((2048, 2048))
+            image.save(path, "JPEG", quality=92)
+        except (UnidentifiedImageError, OSError):
+            continue
+        manifest.add(
+            {
+                "object_id": new_id,
+                "object_name": name,
+                "source_provider": "admin_upload",
+                "source_page_url": "",
+                "image_url": upload.filename or "",
+                "author": "admin",
+                "license": "provided_by_rights_holder",
+                "rights_holder": "admin",
+                "rights_status": "cleared",
+                "retrieved_at": datetime.now(UTC).isoformat(),
+                "sha256": digest,
+                "width": image.width,
+                "height": image.height,
+                "mime_type": "image/jpeg",
+                "processed_path": path.relative_to(ROOT).as_posix(),
+                "status": "accepted",
+            }
+        )
+        saved += 1
+    assign_splits(manifest)
+    manifest.save()
+    objects.append(item)
+    save_catalog(settings.absolute(settings.catalog_path), objects)
+    searcher.reload()
+    return {
+        "success": True,
+        "object": public_object(item),
+        "images_saved": saved,
+        "index_status": "pending_index",
+    }
+
+
+@app.put("/api/objects/{object_id}", dependencies=[Depends(require_admin)])
+def edit_object(
+    object_id: int,
+    name: str | None = Form(None),
+    description: str | None = Form(None),
+    address: str | None = Form(None),
+    latitude: float | None = Form(None),
+    longitude: float | None = Form(None),
+):
+    objects = load_catalog(settings.absolute(settings.catalog_path))
+    found = False
+    for index, item in enumerate(objects):
+        if item.id == object_id:
+            update = {"index_status": "pending_index"}
+            for key, value in {
+                "name": name,
+                "description": description,
+                "address": address,
+                "latitude": latitude,
+                "longitude": longitude,
+            }.items():
+                if value is not None:
+                    update[key] = value
+            objects[index] = item.model_copy(update=update)
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Объект не найден")
+    save_catalog(settings.absolute(settings.catalog_path), objects)
+    searcher.reload()
+    return {"success": True, "object_id": object_id, "index_status": "pending_index"}
+
+
+def rebuild_index_task() -> None:
+    with index_lock:
+        index_state.update(running=True, error="", finished_at=None)
+        try:
+            build_faiss_index(settings.device)
+            searcher.reload()
+        except Exception as error:
+            index_state["error"] = str(error)
+        finally:
+            index_state.update(running=False, finished_at=datetime.now(UTC).isoformat())
+
+
+@app.post("/api/admin/reindex", dependencies=[Depends(require_admin)])
+def reindex(background_tasks: BackgroundTasks):
+    if index_state["running"]:
+        raise HTTPException(409, "Индексация уже выполняется")
+    index_state["running"] = True
+    background_tasks.add_task(rebuild_index_task)
+    return {"success": True, "index_status": "building"}
+
+
+@app.get("/api/stats")
+def stats(db: Session = Depends(get_db)):
+    examples = examples_by_object()
+    objects = catalog_map()
+    return {
+        "objects": len(objects),
+        "images": sum(len(items) for items in examples.values()),
+        "users": len(db.scalars(select(User)).all()),
+        "index_ready": searcher.ready,
+        "index_state": index_state,
+        "model": f"{settings.model_name}:{settings.model_pretrained}",
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ready" if searcher.quality_ready else "degraded",
+        "app": settings.app_name,
+        "index_ready": searcher.ready,
+        "index_reason": searcher.reason,
+        "quality_ready": searcher.quality_ready,
+        "quality": {
+            "top1_accuracy": searcher.metadata.get("test_metrics", {}).get(
+                "top1_accuracy", 0
+            ),
+            "macro_recall": searcher.metadata.get("test_metrics", {}).get(
+                "macro_recall", 0
+            ),
+            "false_accept_rate": searcher.metadata.get("calibration", {}).get(
+                "validation_false_accept_rate", 1
+            ),
+            "released_classes": len(searcher.metadata.get("ready_object_ids", [])),
+        },
+        "index_version": str(searcher.metadata.get("manifest_sha256", ""))[:12],
+        "index_state": index_state,
+    }
+
+
+def run() -> None:
+    import uvicorn
+
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    run()

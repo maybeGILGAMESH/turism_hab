@@ -216,9 +216,9 @@ export default function CameraScreen({ isConnected, apiUrl: defaultApiUrl, onQue
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>🏔️ Северный Кавказ</Text>
-        <Text style={styles.subtitle}>Распознавание туристических достопримечательностей</Text>
-        <Text style={styles.organization}>Факультет Искусственного Интеллекта РУДН</Text>
+        <Text style={styles.title}>🌊 Открой Хабаровский край</Text>
+        <Text style={styles.subtitle}>Узнайте место по фотографии</Text>
+        <Text style={styles.organization}>Ваш AI-гид по Дальнему Востоку</Text>
         {!isConnected && (
           <View style={styles.offlineBanner}>
             <Text style={styles.offlineText}>⚠️ Офлайн режим</Text>
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   header: {
-    backgroundColor: '#667eea',
+    backgroundColor: '#075985',
     padding: 20,
     alignItems: 'center',
   },
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   button: {
-    backgroundColor: '#667eea',
+    backgroundColor: '#0369a1',
     padding: 15,
     borderRadius: 10,
     marginBottom: 10,
@@ -429,4 +429,3 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 });
-

@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   header: {
-    backgroundColor: '#667eea',
+    backgroundColor: '#075985',
     padding: 20,
     paddingTop: 40,
   },
@@ -291,4 +291,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

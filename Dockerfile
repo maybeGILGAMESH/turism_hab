@@ -1,45 +1,29 @@
-# Use Python 3.11 slim image for smaller size
-FROM python:3.11-slim
+FROM python:3.11.16-slim-bookworm
 
-# Set working directory
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/app/artifacts/model_cache
+
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    curl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl libgomp1 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt requirements_new.txt ./
+COPY pyproject.toml uv.lock README.md ./
+RUN python -m pip install --no-cache-dir "uv==0.12.12" \
+    && uv sync --frozen --no-dev --extra ui --extra data
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r requirements_new.txt
+ENV PATH="/app/.venv/bin:${PATH}"
 
-# Copy application code
-COPY . .
+COPY *.py ./
+COPY catalog ./catalog
+COPY static ./static
 
-# Create necessary directories
-RUN mkdir -p uploads data/images
+RUN mkdir -p dataset/processed artifacts/model_cache runtime uploads
 
-# Expose ports
-EXPOSE 8000 8501 8080
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Default command to run the system
-CMD ["python", "run_system.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

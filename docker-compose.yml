@@ -1,30 +1,49 @@
-version: '3.8'
+name: discover-khabarovsk-krai
+
+x-app: &app
+  image: discover-khabarovsk-krai:local
+  build:
+    context: .
+  env_file:
+    - .env
+  environment:
+    HF_HUB_DISABLE_XET: "1"
+  volumes:
+    - ./catalog:/app/catalog
+    - ./dataset/processed:/app/dataset/processed:ro
+    - ./dataset/manifest.csv:/app/dataset/manifest.csv:ro
+    - ./artifacts:/app/artifacts
+    - ./runtime:/app/runtime
+    - ./uploads:/app/uploads
+  restart: unless-stopped
 
 services:
-  metro-app:
-    build: .
-    container_name: moscow-metro-app
+  api:
+    <<: *app
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"   # Backend API
-      - "8501:8501"   # Streamlit frontend
-      - "8080:8080"   # HTML frontend
-    volumes:
-      - ./artifacts:/app/artifacts:ro
-      - ./uploads:/app/uploads
-      - ./data:/app/data
-    environment:
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-    restart: unless-stopped
+      - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 20s
       timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - metro-network
+      retries: 5
+      start_period: 60s
 
-networks:
-  metro-network:
-    driver: bridge
+  streamlit:
+    <<: *app
+    command: ["streamlit", "run", "frontend.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      API_BASE_URL: http://api:8000
+      HF_HUB_DISABLE_XET: "1"
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      api:
+        condition: service_healthy
