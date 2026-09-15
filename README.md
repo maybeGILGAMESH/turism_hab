@@ -50,7 +50,10 @@ python check_index.py
 python data_pipeline.py export-cleared
 ```
 
-Фотографии со статусом `pending_purchase` предназначены только для локальной проверки до оформления прав.
+> **Права на фотографии оформлены.** По состоянию на 15 сентября 2026 года права на все
+> фотографии датасета оформлены. Значения `pending_purchase` в `dataset/manifest.csv`
+> остались от импорта: manifest входит в SHA-256-версию FAISS-индекса, поэтому статусы
+> будут обновлены на `cleared` вместе со следующей пересборкой индекса.
 
 ## Мобильное приложение
 
@@ -94,25 +97,63 @@ Compose поднимает `api:8000` и `streamlit:8501`. Датасет, ин�
 Ручной набор импортирован: 309 оригиналов и 303 index-аугментации. Групповая
 leave-one-source-out проверка по всем оригиналам дала top-1 `87.38%`, macro
 recall `85.20%`, proxy FAR `4.85%`; recall не ниже 70% у 39 классов.
-`/health` возвращает `status=ready`. Для публичной публикации самих фотографий
-по-прежнему требуется оформление прав: все текущие кадры имеют
-`pending_purchase` и исключаются из cleared-export. Подробности — в
+`/health` возвращает `status=ready`. Права на все фотографии оформлены; до обновления
+статусов в manifest `export-cleared` по-прежнему их не включает. Подробности — в
 [`reports/IMPLEMENTATION.md`](reports/IMPLEMENTATION.md).
 
-## Подготовка к GitHub
+## GitHub
+
+Репозиторий: <https://github.com/maybeGILGAMESH/turism_hab> (публичный, права на фотографии оформлены).
+
+| Ветка / тег | Что внутри |
+|---|---|
+| `v2.0.0-demo-stable` | зафиксированная стабильная демо-версия 2.0.0 |
+| `main` | версия 2.0.0 и актуальная документация |
+| `feature/v3-tour-guide` | версия 3.0: карточки мест, расчёт маршрутов, локальный ИИ-гид, новый интерфейс |
 
 В Git попадают код, каталог, воспроизводимый manifest, lock-файлы и отчёты.
-Фотографии, модель, FAISS, `.env`, Android SDK, `.venv`, `node_modules`, SQLite
-и пользовательские загрузки исключены. После клонирования положите разрешённый
-исходный набор в путь выше, затем выполните `bootstrap.ps1`,
-`collect-data.ps1` и `build-index.ps1`.
+Фотографии, модель CLIP, FAISS, `.env`, SQLite, Android SDK, `.venv`, `node_modules`
+и пользовательские загрузки исключены. После клонирования положите исходный набор
+в путь выше и выполните `bootstrap.ps1`, `collect-data.ps1` и `build-index.ps1`.
 
-Перед отправкой создайте закрытый репозиторий и добавьте remote:
+### Клонирование
 
 ```powershell
-git remote add origin <URL-РЕПОЗИТОРИЯ>
-git push -u origin main
+git clone https://github.com/maybeGILGAMESH/turism_hab.git
+cd turism_hab
+git checkout v2.0.0-demo-stable        # стабильная версия
+git checkout feature/v3-tour-guide     # версия 3.0
 ```
 
-Пока права на фотографии не оформлены, репозиторий и любые отдельные data/model
-artifacts следует держать закрытыми.
+### Отправка изменений по HTTPS с токеном
+
+Токен вводится при каждом `git push` и нигде не сохраняется.
+
+1. Один раз в папке репозитория отключите сохранение учётных данных:
+
+   ```powershell
+   git config --local credential.helper ""
+   ```
+
+2. Создайте токен: **Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token**. Укажите срок действия, в
+   **Repository access** выберите только `turism_hab`, в **Repository permissions**
+   выставьте **Contents** и **Workflows** в **Read and write** (Workflows нужен из-за
+   `.github/workflows/ci.yml`). Токен показывается один раз.
+
+3. Рабочий цикл:
+
+   ```powershell
+   git status
+   git add .
+   git commit -m "описание изменений"
+   git push                     # для новой ветки: git push -u origin <ветка>
+   ```
+
+   На запрос `Username` введите логин GitHub, на запрос `Password` — токен
+   (в PowerShell вставка правой кнопкой мыши, символы не отображаются).
+
+Ошибка `Invalid username or token` означает, что вместо токена введён пароль,
+токен истёк или у него нет доступа к репозиторию и прав Contents/Workflows.
+Не добавляйте токен в адрес remote — он сохранится открытым текстом в `.git/config`.
+Ненужный токен удаляется на странице **Fine-grained tokens → Delete**.
