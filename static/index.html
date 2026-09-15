@@ -103,10 +103,11 @@ h3{margin:0}
 
 /* route */
 .route{display:grid;grid-template-columns:360px 1fr;gap:var(--gap);align-items:start}
+.route > *{min-width:0}
 .seg{display:grid;grid-template-columns:1fr 1fr;background:var(--sky);border-radius:12px;padding:4px;gap:4px}
 .seg button{border:0;background:transparent;min-height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;color:var(--amur-dark);cursor:pointer}
 .seg button[aria-pressed=true]{background:#fff;box-shadow:var(--shadow)}
-.stops{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px}
+.stops{list-style:none;margin:12px 0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
 .stops li{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 12px}
 .stops li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
@@ -325,6 +326,7 @@ details summary{cursor:pointer;color:var(--amur);font-weight:600;min-height:var(
   };
   const CATEGORY = {architecture:'Архитектура', engineering:'Инженерия', museum:'Музей', religion:'Храм', monument:'Памятник', memorial:'Мемориал', urban_space:'Городское пространство', culture:'Культура', archaeology:'Археология', ethnography:'Этнография', nature:'Природа'};
   const fmtMin = v => { v = Math.round(+v || 0); if (v < 60) return `${v} мин`; const h = Math.floor(v / 60), m = v % 60; if (h >= 48) { const d = Math.floor(h / 24), hh = h % 24; return hh ? `${d} дн ${hh} ч` : `${d} дн`; } return m ? `${h} ч ${m} мин` : `${h} ч`; };
+  const fmtKm = v => (+v < 0.1 ? '<0,1' : String(+v).replace('.', ','));
   const state = { objects: [], byId: new Map(), routeIds: store.get('route', []), mode: store.get('mode', 'walk'), chat: store.get('chat', []), guideObject: null, detailId: null, file: null };
 
   async function api(path, options = {}) {
@@ -498,12 +500,12 @@ details summary{cursor:pointer;color:var(--amur);font-weight:600;min-height:var(
       const range = r => r.min === r.max ? fmtMin(r.min) : `${fmtMin(r.min)} – ${fmtMin(r.max)}`;
       $('#routeResult').innerHTML = `
         <h2>${d.travel_mode === 'walk' ? 'Пешая прогулка' : 'Поездка на автомобиле'} · ${s.stops} ${s.stops === 1 ? 'место' : 'мест'}</h2>
-        <div class="stats"><div class="stat"><small>В пути</small><b>${remote ? range(s.travel_minutes_range) : fmtMin(s.travel_minutes)}</b><small>≈ ${esc(s.estimated_road_km)} км</small></div>
+        <div class="stats"><div class="stat"><small>В пути</small><b>${remote ? range(s.travel_minutes_range) : fmtMin(s.travel_minutes)}</b><small>≈ ${esc(fmtKm(s.estimated_road_km))} км</small></div>
           <div class="stat"><small>На осмотр</small><b>${fmtMin(s.visit_minutes)}</b><small>${range(s.visit_minutes_range)}</small></div>
           <div class="stat total"><small>Итого</small><b>${remote ? range(s.total_minutes_range) : fmtMin(s.total_minutes)}</b><small>${s.available_minutes ? (s.fits_available_time ? 'укладывается в ваше время' : 'не укладывается') : 'ориентировочно'}</small></div></div>
         ${(d.warnings || []).map(w => `<div class="notice">${icon('alert')}<span>${esc(w)}</span></div>`).join('')}
         <ol class="timeline">${d.route.map(item => { const leg = item.leg; const t = leg ? (leg.is_range ? range(leg.travel_minutes_range) : fmtMin(leg.travel_minutes)) : ''; return `<li><span class="num">${item.order}</span>
-          ${leg ? `<p class="leg">${icon(leg.mode === 'walk' ? 'walk' : 'car')}${esc(leg.estimated_road_km)} км · ~${t}</p>` : '<p class="leg">Старт маршрута</p>'}
+          ${leg ? `<p class="leg">${icon(leg.mode === 'walk' ? 'walk' : 'car')}${esc(fmtKm(leg.estimated_road_km))} км · ~${t}</p>` : '<p class="leg">Старт маршрута</p>'}
           <div class="stop-card"><b>${esc(item.name)}</b><div class="small muted">Осмотр ~${fmtMin(item.visit_minutes.planned)} · прибытие через ${fmtMin(item.arrival_after_minutes)}</div><div class="actions" style="margin-top:6px"><button class="btn ghost sm" data-act="detail" data-id="${item.id}">Подробнее</button></div></div></li>`; }).join('')}</ol>
         <p class="small muted">${esc(d.estimation.description)}</p>
         <div class="actions"><button class="btn gold" id="askRoute">${icon('chat')}Спросить гида о маршруте</button></div>`;

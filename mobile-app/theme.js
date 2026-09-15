@@ -68,6 +68,11 @@ export function formatMinutes(value) {
   return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
 }
 
+export function formatKm(value) {
+  const km = Number(value) || 0;
+  return km < 0.1 ? '<0,1' : String(km).replace('.', ',');
+}
+
 export function formatRange(range) {
   if (!range) return '';
   return range.min === range.max ? formatMinutes(range.min) : `${formatMinutes(range.min)} – ${formatMinutes(range.max)}`;

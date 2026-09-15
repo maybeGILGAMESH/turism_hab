@@ -3,7 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { Button, Card, Chip, EmptyState, Icon, IconButton, Notice, Segmented } from '../components/ui';
 import { useAppState } from '../context/AppState';
 import { Api } from '../services/api';
-import { colors, formatMinutes, formatRange, radius, spacing, type } from '../theme';
+import { colors, formatKm, formatMinutes, formatRange, radius, spacing, type } from '../theme';
 
 const TIME_OPTIONS = [
   { value: null, label: 'Без ограничения' },
@@ -89,7 +89,7 @@ export default function RouteScreen({ navigation }) {
       {result && result.route.length ? (
         <>
           <View style={styles.stats}>
-            <View style={styles.stat}><Text style={type.label}>В пути</Text><Text style={styles.statValue}>{remote ? formatRange(summary.travel_minutes_range) : formatMinutes(summary.travel_minutes)}</Text><Text style={type.small}>≈ {summary.estimated_road_km} км</Text></View>
+            <View style={styles.stat}><Text style={type.label}>В пути</Text><Text style={styles.statValue}>{remote ? formatRange(summary.travel_minutes_range) : formatMinutes(summary.travel_minutes)}</Text><Text style={type.small}>≈ {formatKm(summary.estimated_road_km)} км</Text></View>
             <View style={styles.stat}><Text style={type.label}>На осмотр</Text><Text style={styles.statValue}>{formatMinutes(summary.visit_minutes)}</Text><Text style={type.small}>{formatRange(summary.visit_minutes_range)}</Text></View>
           </View>
           <View style={[styles.stat, styles.statTotal]}>
@@ -114,7 +114,7 @@ export default function RouteScreen({ navigation }) {
                   <View style={styles.flex}>
                     <View style={styles.leg}>
                       <Icon name={leg ? (leg.mode === 'walk' ? 'walk' : 'car-outline') : 'flag-outline'} size={16} color={colors.muted} />
-                      <Text style={type.small}>{leg ? `${leg.estimated_road_km} км · ~${travel}` : 'Старт маршрута'}</Text>
+                      <Text style={type.small}>{leg ? `${formatKm(leg.estimated_road_km)} км · ~${travel}` : 'Старт маршрута'}</Text>
                     </View>
                     <Card onPress={() => navigation.navigate('PlaceDetail', { id: item.id, name: item.name })} style={styles.stopCard} accessibilityLabel={`${item.name}, открыть карточку`}>
                       <Text style={type.h3}>{item.name}</Text>
