@@ -87,7 +87,7 @@ class RAGSearcher:
                 self.metadata = metadata
                 self.reason = "catalog/manifest/model version does not match index"
                 return
-            index = read_index(index_path)
+            index = read_index(index_path, self.settings.runtime_alias_dir)
             if index.ntotal != len(metadata.get("index_metadata", [])):
                 self.index = None
                 self.metadata = metadata

@@ -1,40 +1,584 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Открой Хабаровский край</title>
-  <style>
-    :root{--ink:#082f49;--blue:#0369a1;--sky:#38bdf8;--ice:#eef9ff;--sand:#fffaf0;--white:#fff;--muted:#64748b}
-    *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:linear-gradient(#dff5ff,#fff 420px)}
-    header{padding:18px max(20px,calc((100vw - 1120px)/2));display:flex;align-items:center;justify-content:space-between}header b{font-size:20px}.badge{background:#fff8;padding:8px 12px;border-radius:999px;font-size:13px}
-    main{max-width:1120px;margin:auto;padding:10px 20px 80px}.hero{min-height:300px;border-radius:30px;padding:42px;background:radial-gradient(circle at 80% 10%,#7dd3fc 0 8%,transparent 9%),radial-gradient(circle at 75% 35%,#0ea5e9 0 16%,transparent 17%),linear-gradient(135deg,#075985,#0284c7 62%,#164e63);color:white;display:flex;flex-direction:column;justify-content:end;box-shadow:0 22px 50px #07598533}.hero h1{font-size:clamp(36px,7vw,72px);line-height:1;margin:0;max-width:800px}.hero p{font-size:19px;max-width:620px;margin:18px 0 0}
-    nav{display:flex;gap:8px;margin:24px 0;overflow:auto}nav button{border:0;background:white;padding:12px 18px;border-radius:999px;color:var(--ink);white-space:nowrap;cursor:pointer;box-shadow:0 4px 14px #07598512}nav button.active{background:var(--ink);color:white}
-    section{display:none}section.active{display:block}.panel{background:white;border:1px solid #bae6fd;border-radius:24px;padding:24px;box-shadow:0 10px 30px #07598510}.upload{border:2px dashed #7dd3fc;border-radius:20px;min-height:240px;display:grid;place-items:center;text-align:center;padding:30px;cursor:pointer;background:var(--ice)}.upload.drag{background:#d8f3ff;border-color:var(--blue)}
-    input[type=file]{display:none}.primary{border:0;border-radius:14px;padding:13px 20px;background:var(--blue);color:white;font-weight:700;cursor:pointer}.primary:disabled{opacity:.5}.preview{max-width:100%;max-height:420px;border-radius:18px}.result{margin-top:20px;padding:20px;border-radius:18px;background:var(--sand)}
-    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{border-radius:20px;overflow:hidden;background:white;border:1px solid #e0f2fe;box-shadow:0 8px 24px #07598510}.card img{width:100%;height:190px;object-fit:cover;background:#e0f2fe}.card div{padding:16px}.card h3{margin:0 0 6px}.card small{color:var(--muted)}
-    .fields{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.fields label{font-size:13px;color:var(--muted)}.fields input{width:100%;padding:12px;border:1px solid #bae6fd;border-radius:12px;margin-top:5px}.route-item{padding:14px 0;border-bottom:1px solid #e2e8f0}.status{position:fixed;right:16px;bottom:16px;background:var(--ink);color:white;border-radius:14px;padding:10px 14px;font-size:13px}
-    @media(max-width:760px){header .badge{display:none}.hero{min-height:360px;padding:26px}.grid{grid-template-columns:1fr}.fields{grid-template-columns:1fr}.panel{padding:16px}.card img{height:220px}}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Открой Хабаровский край</title>
+<style>
+:root{
+  --amur:#0B4F7C;--amur-dark:#073654;--amur-600:#0E6399;--sky:#E8F3FA;--sky-2:#CFE6F3;--gold:#C8962E;--gold-soft:#FBF3E0;--gold-ink:#7A5712;
+  --ink:#14212B;--muted:#5A6B78;--line:#D9E4EC;--bg:#F6F9FB;--card:#FFFFFF;--ok:#1E7A4F;--warn:#B06A12;--bad:#B3261E;
+  --r-sm:10px;--r:14px;--r-lg:20px;--shadow:0 1px 2px rgba(7,54,84,.06),0 6px 20px rgba(7,54,84,.06);--shadow-lg:0 18px 50px rgba(7,54,84,.22);
+  --gap:16px;--tap:44px;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--ink)}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+body.locked{overflow:hidden}
+img{max-width:100%;display:block}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--amur-600)}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left))}
+.icon{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+[hidden]{display:none!important}
+
+/* header */
+.topbar{position:sticky;top:0;z-index:20;background:rgba(246,249,251,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;gap:12px;min-height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--amur-dark);text-decoration:none;min-width:0}
+.brand-mark{width:34px;height:34px;border-radius:10px;background:var(--amur);display:grid;place-items:center;color:#fff;flex:none}
+.brand span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;gap:4px;margin-left:auto}
+.tab{border:0;background:transparent;min-height:40px;padding:0 14px;border-radius:999px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;font-weight:600}
+.tab:hover{background:var(--sky)}
+.tab[aria-selected=true]{background:var(--amur);color:#fff}
+.tab .count{background:var(--gold);color:#fff;border-radius:999px;font-size:11px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 5px}
+.guide-btn{border:0;background:var(--gold);color:#fff;min-height:40px;padding:0 14px;border-radius:999px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer}
+.guide-btn:hover{filter:brightness(.95)}
+
+/* layout */
+main{padding-block:20px 96px}
+.intro{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:12px;margin-bottom:18px}
+.intro h1{font-size:clamp(24px,3.2vw,34px);line-height:1.15;margin:0;color:var(--amur-dark);letter-spacing:-.01em}
+.intro p{margin:6px 0 0;color:var(--muted);max-width:640px}
+section[data-panel]{display:none}
+section[data-panel].active{display:block}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px;box-shadow:var(--shadow)}
+.muted{color:var(--muted)}.small{font-size:13px}
+h2{font-size:20px;margin:0 0 12px;color:var(--amur-dark)}
+h3{margin:0}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--tap);padding:0 18px;border-radius:12px;border:1px solid transparent;background:var(--amur);color:#fff;font-weight:600;cursor:pointer;text-decoration:none}
+.btn:hover{background:var(--amur-600)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--amur);border-color:var(--sky-2)}
+.btn.ghost:hover{background:var(--sky)}
+.btn.gold{background:var(--gold)}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px;border-radius:10px}
+.icon-btn{width:var(--tap);height:var(--tap);border-radius:12px;border:1px solid var(--line);background:#fff;display:grid;place-items:center;cursor:pointer;color:var(--ink)}
+.icon-btn:hover{background:var(--sky)}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* recognize */
+.recog{display:grid;grid-template-columns:1.1fr .9fr;gap:var(--gap)}
+.drop{border:2px dashed var(--sky-2);border-radius:var(--r);min-height:280px;display:grid;place-items:center;text-align:center;padding:24px;cursor:pointer;background:var(--sky);position:relative;overflow:hidden}
+.drop.drag{border-color:var(--amur);background:#DDEEF8}
+.drop img{max-height:420px;border-radius:12px;object-fit:contain}
+.drop .hint{display:grid;gap:8px;justify-items:center;color:var(--amur-dark)}
+.drop .hint .icon{width:34px;height:34px}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.result-empty{display:grid;place-items:center;text-align:center;min-height:200px;color:var(--muted);padding:20px}
+.result h3{font-size:22px;color:var(--amur-dark)}
+.confidence{height:8px;border-radius:99px;background:var(--sky);overflow:hidden;margin:8px 0 4px}
+.confidence i{display:block;height:100%;background:var(--ok)}
+
+/* filters + grid */
+.filters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:10px;margin-bottom:14px}
+.field{display:grid;gap:4px}
+.field label{font-size:12px;color:var(--muted);font-weight:600}
+.input,select.input,textarea.input{width:100%;min-height:var(--tap);padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.input:focus{border-color:var(--amur);outline:none;box-shadow:0 0 0 3px rgba(11,79,124,.15)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.card:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(7,54,84,.12)}
+.card-media{position:relative;aspect-ratio:16/10;background:var(--sky)}
+.card-media img{width:100%;height:100%;object-fit:cover}
+.ph{width:100%;height:100%;display:grid;place-items:center;color:var(--amur)}
+.ph .icon{width:40px;height:40px;opacity:.5}
+.badge{position:absolute;left:10px;top:10px;background:rgba(255,255,255,.94);color:var(--amur-dark);font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px}
+.badge.remote{left:auto;right:10px;background:var(--gold-soft);color:var(--gold-ink)}
+.card-body{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.card-body h3{font-size:17px;line-height:1.3}
+.card-body p{margin:0;color:var(--muted);font-size:14px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.meta{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+.meta .icon{width:15px;height:15px}
+.facts{list-style:none;padding:0;margin:4px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.facts li{display:flex;align-items:center;gap:5px;background:var(--sky);color:var(--amur-dark);border-radius:999px;padding:3px 10px;font-size:12.5px}
+.facts li .icon{width:14px;height:14px}
+.facts li.gold{background:var(--gold-soft);color:var(--gold-ink)}
+.card-actions{display:flex;gap:8px;margin-top:auto;padding-top:8px}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+
+/* route */
+.route{display:grid;grid-template-columns:360px 1fr;gap:var(--gap);align-items:start}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--sky);border-radius:12px;padding:4px;gap:4px}
+.seg button{border:0;background:transparent;min-height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;color:var(--amur-dark);cursor:pointer}
+.seg button[aria-pressed=true]{background:#fff;box-shadow:var(--shadow)}
+.stops{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px}
+.stops li{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 12px}
+.stops li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.stat{background:var(--sky);border-radius:12px;padding:12px}
+.stat b{display:block;font-size:20px;color:var(--amur-dark)}
+.stat small{color:var(--muted)}
+.stat.total{background:var(--amur);color:#fff}.stat.total b,.stat.total small{color:#fff}
+.timeline{list-style:none;margin:0;padding:0}
+.timeline li{position:relative;padding:0 0 14px 44px}
+.timeline li::before{content:"";position:absolute;left:15px;top:30px;bottom:0;border-left:2px dashed var(--sky-2)}
+.timeline li:last-child::before{display:none}
+.num{position:absolute;left:0;top:0;width:32px;height:32px;border-radius:50%;background:var(--amur);color:#fff;display:grid;place-items:center;font-weight:700}
+.leg{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;margin:0 0 6px}
+.stop-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff}
+.notice{display:flex;gap:10px;background:var(--gold-soft);color:var(--gold-ink);border-radius:12px;padding:10px 12px;font-size:14px;margin-bottom:8px}
+.notice.bad{background:#FBE9E7;color:var(--bad)}
+details summary{cursor:pointer;color:var(--amur);font-weight:600;min-height:var(--tap);display:flex;align-items:center}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* drawers */
+.scrim{position:fixed;inset:0;background:rgba(7,33,51,.45);z-index:40}
+.drawer{position:fixed;z-index:50;top:0;right:0;bottom:0;width:min(560px,100%);background:#fff;box-shadow:var(--shadow-lg);display:flex;flex-direction:column}
+.drawer-head{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 18px;border-bottom:1px solid var(--line)}
+.drawer-head h2{margin:0;font-size:18px;flex:1;min-width:0}
+.drawer-body{overflow:auto;padding:18px;flex:1}
+.gallery{display:grid;grid-template-columns:2fr 1fr;gap:6px;border-radius:14px;overflow:hidden;margin-bottom:14px}
+.gallery img{width:100%;height:100%;object-fit:cover;aspect-ratio:4/3}
+.gallery.one{grid-template-columns:1fr}
+.gallery .side{display:grid;gap:6px}
+.sec{border-top:1px solid var(--line);padding:14px 0}
+.sec h3{font-size:15px;margin:0 0 6px;color:var(--amur-dark);display:flex;align-items:center;gap:6px}
+.sec p{margin:0 0 6px}
+.sec ul{margin:0;padding-left:18px}
+.pack-tabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.pack-tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;min-height:36px;padding:0 12px;cursor:pointer}
+.pack-tabs button[aria-pressed=true]{background:var(--amur);border-color:var(--amur);color:#fff}
+.src{font-size:13px}
+.drawer-foot{display:flex;gap:8px;padding:12px 18px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.drawer-foot .btn{flex:1}
+
+/* chat */
+.chat{display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:88%;padding:10px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+.bubble.user{align-self:flex-end;background:var(--amur);color:#fff;border-bottom-right-radius:4px}
+.bubble.bot{align-self:flex-start;background:var(--sky);border-bottom-left-radius:4px}
+.bubble .foot{margin-top:8px;font-size:12px;color:var(--muted);white-space:normal}
+.bubble .foot a{display:inline-block;margin:2px 6px 0 0}
+.bubble .warn{margin-top:6px;font-size:12px;color:var(--gold-ink);white-space:normal}
+.mode{display:inline-flex;align-items:center;gap:6px;font-size:12px;border-radius:999px;padding:3px 10px;background:var(--sky);color:var(--amur-dark);white-space:nowrap}
+.mode .dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.mode.on .dot{background:var(--ok)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{border:1px solid var(--sky-2);background:#fff;color:var(--amur-dark);border-radius:999px;min-height:36px;padding:0 12px;cursor:pointer;font-size:13px;text-align:left}
+.chip:hover{background:var(--sky)}
+.context{display:flex;align-items:center;gap:6px;background:var(--gold-soft);color:var(--gold-ink);border-radius:999px;padding:0 4px 0 12px;font-size:13px;min-height:34px;max-width:100%}
+.context span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.context button{border:0;background:transparent;width:30px;height:30px;border-radius:50%;cursor:pointer;color:inherit;display:grid;place-items:center}
+.composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:grid;gap:8px}
+.composer form{display:flex;gap:8px;align-items:flex-end}
+.composer textarea{resize:none;min-height:var(--tap);max-height:140px}
+.typing{align-self:flex-start;color:var(--muted);font-size:13px}
+
+.status{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:15;background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;display:flex;align-items:center;gap:6px;box-shadow:var(--shadow)}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.fab{display:none}
+
+@media (max-width:1023px){
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .filters{grid-template-columns:1fr 1fr}
+  .filters .field:first-child{grid-column:1/-1}
+  .route{grid-template-columns:1fr}
+  .tab .label{display:none}
+  .tab{padding:0 12px}
+}
+@media (max-width:640px){
+  .brand span{display:none}
+  .tabs{margin-left:0;flex:1;justify-content:space-around}
+  .guide-btn .label{display:none}
+  .guide-btn{padding:0 12px}
+  .recog{grid-template-columns:1fr}
+  .grid{grid-template-columns:1fr}
+  .panel{padding:14px}
+  .drop{min-height:220px}
+  .stats{grid-template-columns:1fr 1fr}
+  .stat.total{grid-column:1/-1}
+  .row{grid-template-columns:1fr}
+  .drawer{width:100%}
+  .mode .mode-text{display:none}
+  .drawer-head{padding-left:14px;gap:6px}
+  .status{display:none}
+  .fab{display:flex;position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:15;border-radius:999px;box-shadow:var(--shadow-lg)}
+  .gallery{grid-template-columns:1fr}.gallery .side{display:none}
+}
+@media (min-width:1360px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
 </head>
 <body>
-<header><b>🌊 Открой Хабаровский край</b><span class="badge">AI-гид по Дальнему Востоку</span></header>
-<main>
-  <div class="hero"><h1>Край, который хочется узнать</h1><p>Наведите камеру на достопримечательность, узнайте её историю и добавьте место в маршрут.</p></div>
-  <nav><button class="active" data-tab="recognize">📷 Распознать</button><button data-tab="catalog">🗺️ Каталог</button><button data-tab="route">🧭 Маршрут</button><button onclick="location.href='/docs'">API</button></nav>
-  <section id="recognize" class="active"><div class="panel">
-    <h2>Что перед вами?</h2><label class="upload" id="drop"><span id="prompt"><b>Выберите или перетащите фотографию</b><br><small>JPEG, PNG или WebP до 10 МБ</small></span><img id="preview" class="preview" hidden></label><input id="file" type="file" accept="image/jpeg,image/png,image/webp">
-    <p><button id="run" class="primary" disabled>Распознать место</button></p><div id="result"></div>
-  </div></section>
-  <section id="catalog"><h2>Места Хабаровского края</h2><div id="cards" class="grid"></div></section>
-  <section id="route"><div class="panel"><h2>Ближайшие места</h2><div class="fields"><label>Широта<input id="lat" type="number" value="48.4800" step=".0001"></label><label>Долгота<input id="lon" type="number" value="135.0710" step=".0001"></label><label>Количество<input id="limit" type="number" value="7" min="1" max="20"></label></div><p><button id="routeRun" class="primary">Построить маршрут</button></p><div id="routeResult"></div></div></section>
-</main><div class="status" id="status">Проверяем сервер…</div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="M9 21l2-6 3 3v3M7 12l3-4 3 2 3 3M10 8l-1 5"/></symbol>
+  <symbol id="i-car" viewBox="0 0 24 24"><path d="M5 17h14v-5l-2-5H7l-2 5z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/><path d="M5 12h14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+  <symbol id="i-mountain" viewBox="0 0 24 24"><path d="M3 20l6-10 4 6 3-4 5 8z"/><circle cx="17" cy="6" r="2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/></symbol>
+  <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 7h12l1 14H5z"/><path d="M9 7a3 3 0 0 1 6 0"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M17 11a3 3 0 1 0 0-6M1 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2M23 21v-2a4 4 0 0 0-3-3.9"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 12c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M2 17c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M7 7l3-4 3 4"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-mark"><svg class="icon"><use href="#i-wave"/></svg></span><span>Открой Хабаровский край</span></a>
+    <nav class="tabs" role="tablist" aria-label="Разделы">
+      <button class="tab" role="tab" data-tab="recognize" aria-selected="true"><svg class="icon"><use href="#i-camera"/></svg><span class="label">Распознать</span></button>
+      <button class="tab" role="tab" data-tab="catalog" aria-selected="false"><svg class="icon"><use href="#i-grid"/></svg><span class="label">Места</span></button>
+      <button class="tab" role="tab" data-tab="route" aria-selected="false"><svg class="icon"><use href="#i-route"/></svg><span class="label">Маршрут</span><span class="count" id="routeCount" hidden>0</span></button>
+    </nav>
+    <button class="guide-btn" id="openGuide" type="button"><svg class="icon"><use href="#i-chat"/></svg><span class="label">ИИ-гид</span></button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section data-panel="recognize" class="active" aria-labelledby="h-recognize">
+    <div class="intro"><div><h1 id="h-recognize">Что перед вами?</h1><p>Загрузите фотографию достопримечательности — узнаем место, расскажем историю и поможем спланировать визит.</p></div></div>
+    <div class="recog">
+      <div class="panel">
+        <label class="drop" id="drop" for="file" tabindex="0">
+          <span class="hint" id="dropHint"><svg class="icon"><use href="#i-camera"/></svg><b>Выберите или перетащите фото</b><span class="small muted">JPEG, PNG или WebP до 10 МБ</span></span>
+          <img id="preview" alt="Выбранная фотография" hidden>
+        </label>
+        <input id="file" class="sr" type="file" accept="image/jpeg,image/png,image/webp">
+        <div class="actions"><button id="runRecognize" class="btn" disabled><svg class="icon"><use href="#i-check"/></svg>Распознать место</button><button id="pickAnother" class="btn ghost" hidden>Другое фото</button></div>
+      </div>
+      <div class="panel" id="result" aria-live="polite"><div class="result-empty"><div><svg class="icon" style="width:36px;height:36px;margin:0 auto 8px;color:var(--amur)"><use href="#i-mountain"/></svg>Здесь появится результат распознавания.</div></div></div>
+    </div>
+  </section>
+
+  <section data-panel="catalog" aria-labelledby="h-catalog">
+    <div class="intro"><div><h1 id="h-catalog">Места Хабаровского края</h1><p id="catalogLead">Загружаем каталог…</p></div></div>
+    <div class="filters">
+      <div class="field"><label for="q">Поиск</label><input id="q" class="input" type="search" placeholder="Название или район"></div>
+      <div class="field"><label for="fCategory">Категория</label><select id="fCategory" class="input"><option value="">Все</option></select></div>
+      <div class="field"><label for="fMunicipality">Район</label><select id="fMunicipality" class="input"><option value="">Все</option></select></div>
+      <div class="field"><label for="fSeason">Сезон</label><select id="fSeason" class="input"><option value="">Любой</option><option value="winter">Зима</option><option value="spring">Весна</option><option value="summer">Лето</option><option value="autumn">Осень</option></select></div>
+      <div class="field"><label for="fProfile">Формат</label><select id="fProfile" class="input"><option value="">Любой</option><option value="urban">Городская прогулка</option><option value="regional">Поездка на день</option><option value="remote">Удалённый объект</option></select></div>
+    </div>
+    <div id="cards" class="grid" aria-live="polite"></div>
+  </section>
+
+  <section data-panel="route" aria-labelledby="h-route">
+    <div class="intro"><div><h1 id="h-route">Маршрут</h1><p>Добавляйте места из каталога — рассчитаем порядок, время в пути и на осмотр.</p></div></div>
+    <div class="route">
+      <div class="panel">
+        <div class="seg" role="group" aria-label="Способ передвижения">
+          <button type="button" data-mode="walk" aria-pressed="true"><svg class="icon"><use href="#i-walk"/></svg>Пешком</button>
+          <button type="button" data-mode="car" aria-pressed="false"><svg class="icon"><use href="#i-car"/></svg>Автомобиль</button>
+        </div>
+        <h2 style="margin-top:16px">Места маршрута</h2>
+        <ul class="stops" id="stops"></ul>
+        <p class="small muted" id="stopsEmpty">Пока пусто. Добавьте места в каталоге или постройте маршрут от точки ниже.</p>
+        <div class="field"><label for="available">Сколько у вас времени, мин (необязательно)</label><input id="available" class="input" type="number" min="15" step="15" placeholder="например, 240"></div>
+        <details><summary>Начать от координат</summary>
+          <div class="row"><div class="field"><label for="lat">Широта</label><input id="lat" class="input" type="number" value="48.4800" step=".0001"></div><div class="field"><label for="lon">Долгота</label><input id="lon" class="input" type="number" value="135.0710" step=".0001"></div></div>
+          <div class="field" style="margin-top:8px"><label for="limit">Мест в автоподборе</label><input id="limit" class="input" type="number" value="6" min="1" max="20"></div>
+        </details>
+        <div class="actions"><button id="calcRoute" class="btn"><svg class="icon"><use href="#i-route"/></svg>Рассчитать</button><button id="clearRoute" class="btn ghost">Очистить</button></div>
+      </div>
+      <div class="panel" id="routeResult" aria-live="polite"><div class="result-empty">Результат расчёта появится здесь.</div></div>
+    </div>
+  </section>
+</main>
+
+<div class="status" id="status"><span class="dot"></span><span>Проверяем сервер…</span></div>
+<button class="btn gold fab" id="fabGuide" type="button"><svg class="icon"><use href="#i-chat"/></svg>ИИ-гид</button>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle" hidden>
+  <div class="drawer-head"><h2 id="detailTitle">Место</h2><button class="icon-btn" data-close aria-label="Закрыть"><svg class="icon"><use href="#i-close"/></svg></button></div>
+  <div class="drawer-body" id="detailBody"></div>
+  <div class="drawer-foot"><button class="btn ghost" id="detailRoute"></button><button class="btn gold" id="detailAsk"><svg class="icon"><use href="#i-chat"/></svg>Спросить гида</button></div>
+</aside>
+
+<aside class="drawer" id="guide" role="dialog" aria-modal="true" aria-labelledby="guideTitle" hidden>
+  <div class="drawer-head"><h2 id="guideTitle">ИИ-гид</h2><span class="mode" id="guideMode"><span class="dot"></span><span class="mode-text">проверяем…</span></span><button class="icon-btn" id="clearChat" aria-label="Очистить диалог" title="Очистить диалог"><svg class="icon"><use href="#i-trash"/></svg></button><button class="icon-btn" data-close aria-label="Закрыть"><svg class="icon"><use href="#i-close"/></svg></button></div>
+  <div class="drawer-body"><div class="chat" id="chat" aria-live="polite"></div></div>
+  <div class="composer">
+    <div id="guideContext"></div>
+    <form id="guideForm"><label class="sr" for="guideInput">Вопрос гиду</label><textarea id="guideInput" class="input" rows="1" maxlength="1000" placeholder="История, сезон, что взять, сколько ехать…"></textarea><button class="btn" id="guideSend" aria-label="Отправить"><svg class="icon"><use href="#i-send"/></svg></button></form>
+    <div class="small muted" id="guideCounter">0 / 1000 · гид отвечает только по локальной базе знаний</div>
+  </div>
+</aside>
+
 <script>
-  const $=s=>document.querySelector(s), file=$('#file'),drop=$('#drop'),preview=$('#preview'),run=$('#run');let selected;
-  document.querySelectorAll('nav button[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,section').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='catalog')loadCatalog()});
-  drop.onclick=()=>file.click();['dragenter','dragover'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(e=>drop.addEventListener(e,x=>{x.preventDefault();drop.classList.remove('drag')}));drop.ondrop=e=>show(e.dataTransfer.files[0]);file.onchange=()=>show(file.files[0]);
-  function show(f){if(!f)return;selected=f;preview.src=URL.createObjectURL(f);preview.hidden=false;$('#prompt').hidden=true;run.disabled=false}
-  run.onclick=async()=>{run.disabled=true;run.textContent='Сопоставляем…';const form=new FormData();form.append('file',selected);try{const r=await fetch('/api/recognize',{method:'POST',body:form});const d=await r.json();if(!r.ok)throw Error(d.detail||'Ошибка API');$('#result').innerHTML=d.recognized?`<div class="result"><h2>✅ ${d.object.name}</h2><b>Уверенность ${(d.confidence*100).toFixed(1)}%</b><p>${d.object.description}</p><small>${d.object.municipality} · ${d.object.address||''}</small></div>`:`<div class="result"><h2>Объект не распознан</h2><p>Попробуйте другой ракурс или освещение.</p></div>`}catch(e){$('#result').innerHTML=`<div class="result">${e.message}</div>`}finally{run.disabled=false;run.textContent='Распознать место'}};
-  let loaded=false;async function loadCatalog(){if(loaded)return;const d=await fetch('/api/objects').then(r=>r.json());$('#cards').innerHTML=d.objects.map(o=>`<article class="card">${o.example_images[0]?`<img loading="lazy" src="${o.example_images[0]}">`:'<div style="height:150px;background:#e0f2fe"></div>'}<div><small>${o.municipality} · ${o.category}</small><h3>${o.name}</h3><p>${o.description}</p></div></article>`).join('');loaded=true}
-  $('#routeRun').onclick=async()=>{const d=await fetch('/api/plan-route',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:+$('#lat').value,longitude:+$('#lon').value,limit:+$('#limit').value})}).then(r=>r.json());$('#routeResult').innerHTML=`<b>Оценочная длина: ${d.total_distance_km} км</b>`+d.route.map((x,i)=>`<div class="route-item"><b>${i+1}. ${x.name}</b><br><small>${x.distance_from_previous_km} км от предыдущей точки</small></div>`).join('')};
-  fetch('/health').then(r=>r.json()).then(d=>{$('#status').textContent=d.index_ready?'● Система готова':'● Каталог доступен, индекс собирается';$('#status').style.background=d.index_ready?'#166534':'#9a3412'}).catch(()=>{$('#status').textContent='● Сервер недоступен';$('#status').style.background='#991b1b'});
-</script></body></html>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const icon = (name, extra = '') => `<svg class="icon" ${extra}><use href="#i-${name}"/></svg>`;
+  const store = {
+    get(key, fallback) { try { const v = localStorage.getItem('khv3:' + key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } },
+    set(key, value) { try { localStorage.setItem('khv3:' + key, JSON.stringify(value)); } catch {} },
+  };
+  const CATEGORY = {architecture:'Архитектура', engineering:'Инженерия', museum:'Музей', religion:'Храм', monument:'Памятник', memorial:'Мемориал', urban_space:'Городское пространство', culture:'Культура', archaeology:'Археология', ethnography:'Этнография', nature:'Природа'};
+  const fmtMin = v => { v = Math.round(+v || 0); if (v < 60) return `${v} мин`; const h = Math.floor(v / 60), m = v % 60; if (h >= 48) { const d = Math.floor(h / 24), hh = h % 24; return hh ? `${d} дн ${hh} ч` : `${d} дн`; } return m ? `${h} ч ${m} мин` : `${h} ч`; };
+  const state = { objects: [], byId: new Map(), routeIds: store.get('route', []), mode: store.get('mode', 'walk'), chat: store.get('chat', []), guideObject: null, detailId: null, file: null };
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, options);
+    let data = null; try { data = await response.json(); } catch {}
+    if (!response.ok) {
+      const detail = data && data.detail;
+      throw new Error(typeof detail === 'string' ? detail : response.status === 422 ? 'Проверьте введённые данные' : `Ошибка сервера (${response.status})`);
+    }
+    return data;
+  }
+
+  /* tabs */
+  function showTab(name) {
+    try { history.replaceState(null, '', '#' + name); } catch {}
+    $$('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+    $$('section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === name));
+    window.scrollTo({top: 0});
+  }
+  $$('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+  /* drawers */
+  let lastFocus = null;
+  function openDrawer(el) { lastFocus = document.activeElement; $$('.drawer').forEach(d => d.hidden = d !== el); $('#scrim').hidden = false; el.hidden = false; document.body.classList.add('locked'); setTimeout(() => (el.querySelector('textarea') || el.querySelector('[data-close]')).focus(), 30); }
+  function closeDrawers() { $$('.drawer').forEach(d => d.hidden = true); $('#scrim').hidden = true; document.body.classList.remove('locked'); if (lastFocus) lastFocus.focus(); }
+  $('#scrim').addEventListener('click', closeDrawers);
+  $$('[data-close]').forEach(b => b.addEventListener('click', closeDrawers));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawers(); });
+
+  /* route selection */
+  function inRoute(id) { return state.routeIds.includes(id); }
+  function toggleRoute(id) {
+    state.routeIds = inRoute(id) ? state.routeIds.filter(x => x !== id) : [...state.routeIds, id].slice(0, 20);
+    store.set('route', state.routeIds); renderStops(); renderCards(); syncDetailRoute();
+  }
+  function routeButton(id, cls = 'btn ghost sm') { const on = inRoute(id); return `<button class="${cls}" data-act="route" data-id="${id}" aria-pressed="${on}">${icon(on ? 'check' : 'plus')}${on ? 'В маршруте' : 'В маршрут'}</button>`; }
+  function renderStops() {
+    const count = state.routeIds.length;
+    $('#routeCount').hidden = !count; $('#routeCount').textContent = count;
+    $('#stopsEmpty').hidden = !!count;
+    $('#stops').innerHTML = state.routeIds.map(id => { const o = state.byId.get(id); return o ? `<li><span>${esc(o.name)}</span><button class="icon-btn" data-act="route" data-id="${id}" aria-label="Убрать ${esc(o.name)}">${icon('close')}</button></li>` : ''; }).join('');
+  }
+  $$('.seg button').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; store.set('mode', state.mode); $$('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }));
+  $$('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mode === state.mode)));
+
+  document.addEventListener('click', e => {
+    const target = e.target.closest('[data-act]');
+    if (target) {
+      e.stopPropagation();
+      const id = +target.dataset.id;
+      if (target.dataset.act === 'route') toggleRoute(id);
+      if (target.dataset.act === 'detail') openDetail(id);
+      if (target.dataset.act === 'ask') openGuide(id);
+      if (target.dataset.act === 'question') sendQuestion(target.dataset.q);
+      return;
+    }
+    const card = e.target.closest('.card[data-id]');
+    if (card) openDetail(+card.dataset.id);
+  });
+  document.addEventListener('keydown', e => { const card = e.target.closest && e.target.closest('.card[data-id]'); if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDetail(+card.dataset.id); } });
+
+  /* catalog */
+  function cardHtml(o) {
+    const img = o.example_images && o.example_images[0];
+    return `<article class="card" tabindex="0" data-id="${o.id}" aria-label="${esc(o.name)}">
+      <div class="card-media">${img ? `<img loading="lazy" src="${esc(img)}" alt="">` : `<div class="ph">${icon('mountain')}</div>`}
+        <span class="badge">${esc(CATEGORY[o.category] || o.category)}</span>${o.trip_profile === 'remote' ? '<span class="badge remote">Экспедиция</span>' : ''}</div>
+      <div class="card-body">
+        <div class="meta">${icon('pin')}${esc(o.municipality)}</div>
+        <h3>${esc(o.name)}</h3>
+        <p>${esc(o.short_description || o.description)}</p>
+        <ul class="facts"><li>${icon('cal')}${esc(o.best_months_label || '—')}</li><li>${icon('clock')}${esc(o.visit_label || '—')}</li><li class="gold">${icon('gauge')}${esc(o.difficulty_label || '—')}</li></ul>
+        <div class="card-actions">${routeButton(o.id)}<button class="btn ghost sm" data-act="ask" data-id="${o.id}">${icon('chat')}Спросить</button></div>
+      </div></article>`;
+  }
+  function renderCards() {
+    const q = $('#q').value.trim().toLowerCase(), cat = $('#fCategory').value, mun = $('#fMunicipality').value, season = $('#fSeason').value, profile = $('#fProfile').value;
+    const shown = state.objects.filter(o => (!q || `${o.name} ${o.municipality}`.toLowerCase().includes(q)) && (!cat || o.category === cat) && (!mun || o.municipality === mun) && (!season || (o.seasons || []).includes(season)) && (!profile || o.trip_profile === profile));
+    $('#catalogLead').textContent = `${shown.length} из ${state.objects.length} мест · карточки с историей, сезоном и советами`;
+    $('#cards').innerHTML = shown.length ? shown.map(cardHtml).join('') : '<div class="empty">Ничего не найдено — измените фильтры.</div>';
+  }
+  async function loadCatalog() {
+    try {
+      const data = await api('/api/objects');
+      state.objects = data.objects; state.byId = new Map(data.objects.map(o => [o.id, o]));
+      const fill = (sel, values, label = v => v) => { $(sel).insertAdjacentHTML('beforeend', values.map(v => `<option value="${esc(v)}">${esc(label(v))}</option>`).join('')); };
+      fill('#fCategory', [...new Set(state.objects.map(o => o.category))].sort(), v => CATEGORY[v] || v);
+      fill('#fMunicipality', [...new Set(state.objects.map(o => o.municipality))].sort());
+      state.routeIds = state.routeIds.filter(id => state.byId.has(id));
+      renderCards(); renderStops();
+    } catch (error) { $('#catalogLead').textContent = 'Каталог недоступен: ' + error.message; }
+  }
+  ['#q', '#fCategory', '#fMunicipality', '#fSeason', '#fProfile'].forEach(s => $(s).addEventListener('input', renderCards));
+
+  /* detail */
+  function syncDetailRoute() { if (state.detailId == null) return; const on = inRoute(state.detailId); const b = $('#detailRoute'); b.dataset.act = 'route'; b.dataset.id = state.detailId; b.innerHTML = `${icon(on ? 'check' : 'plus')}${on ? 'В маршруте' : 'Добавить в маршрут'}`; }
+  async function openDetail(id) {
+    state.detailId = id; syncDetailRoute();
+    const base = state.byId.get(id);
+    $('#detailTitle').textContent = base ? base.name : 'Место';
+    $('#detailBody').innerHTML = '<p class="muted">Загружаем карточку…</p>';
+    $('#detailAsk').onclick = () => openGuide(id);
+    openDrawer($('#detail'));
+    try {
+      const o = (await api(`/api/objects/${id}`)).object;
+      const imgs = o.example_images || [];
+      const list = items => items && items.length ? `<ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>` : '<p class="muted">Нет данных.</p>';
+      const sec = (ico, title, body) => `<div class="sec"><h3>${icon(ico)}${esc(title)}</h3>${body}</div>`;
+      $('#detailBody').innerHTML = `
+        ${imgs.length ? `<div class="gallery ${imgs.length === 1 ? 'one' : ''}"><img src="${esc(imgs[0])}" alt="${esc(o.name)}">${imgs.length > 1 ? `<div class="side">${imgs.slice(1, 3).map(i => `<img src="${esc(i)}" alt="">`).join('')}</div>` : ''}</div>` : ''}
+        <div class="meta">${icon('pin')}${esc(o.municipality)}${o.address ? ' · ' + esc(o.address) : ''}</div>
+        <ul class="facts" style="margin:8px 0 12px"><li>${esc(CATEGORY[o.category] || o.category)}</li><li>${icon('cal')}${esc(o.best_months_label || '—')}</li><li>${icon('clock')}${esc(o.visit_label || '—')}</li><li class="gold">${icon('gauge')}${esc(o.difficulty_label || '—')}</li><li>${esc(o.accessibility_label || '')}</li></ul>
+        <p style="font-size:16px">${esc(o.short_description || o.description)}</p>
+        ${o.content_available ? `
+        <p>${esc(o.full_description)}</p>
+        ${sec('book', 'История', `<p>${esc(o.history)}</p>`)}
+        ${sec('check', 'Интересные особенности', list(o.highlights))}
+        ${sec('cal', 'Когда ехать', `<p><b>${esc(o.best_months_label)}.</b> ${esc(o.seasonal_notes)}</p>`)}
+        ${sec('route', 'Как добраться', `<p>${esc(o.transport)}</p><p class="small muted">${esc(o.trip_profile_label)} · осмотр ${esc(o.visit_label)}</p>`)}
+        ${sec('people', 'Семьям и маломобильным посетителям', `<p>${esc(o.family_tips)}</p><p>${esc(o.reduced_mobility_tips)}</p>`)}
+        ${sec('bag', 'Что взять с собой', `<div class="pack-tabs" role="group" aria-label="Сезон">${[['summer','Лето'],['winter','Зима'],['offseason','Межсезонье']].map(([k, l], i) => `<button type="button" data-pack="${k}" aria-pressed="${i === 0}">${l}</button>`).join('')}</div><div id="packList">${list(o.packing.summer)}</div>`)}
+        ${sec('shield', 'Безопасность', list(o.safety))}
+        ${sec('people', 'Этикет', list(o.etiquette))}
+        ${sec('alert', 'Практические советы', list(o.practical_tips))}
+        ${sec('book', 'Источники', `<ul class="src">${o.sources.map(s => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul><p class="small muted">Проверено: ${esc(o.verified_at)}${o.review_status === 'needs_editor_review' ? ' · часть сведений ожидает редакторской проверки' : ''}. Цены и расписания уточняйте в официальных источниках.</p>`)}
+        ` : `<p class="muted">Расширенная карточка для этого места ещё не подготовлена.</p>`}`;
+      $$('[data-pack]', $('#detailBody')).forEach(b => b.addEventListener('click', () => { $$('[data-pack]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); $('#packList').innerHTML = list(o.packing[b.dataset.pack]); }));
+    } catch (error) { $('#detailBody').innerHTML = `<div class="notice bad">${icon('alert')}${esc(error.message)}</div>`; }
+  }
+
+  /* recognition */
+  const file = $('#file'), drop = $('#drop'), preview = $('#preview');
+  drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } });
+  ['dragenter', 'dragover'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', e => choose(e.dataTransfer.files[0]));
+  file.addEventListener('change', () => choose(file.files[0]));
+  $('#pickAnother').addEventListener('click', () => file.click());
+  function choose(f) { if (!f) return; state.file = f; file.value = ''; preview.src = URL.createObjectURL(f); preview.hidden = false; $('#dropHint').hidden = true; $('#runRecognize').disabled = false; $('#pickAnother').hidden = false; }
+  $('#runRecognize').addEventListener('click', async () => {
+    const button = $('#runRecognize'); button.disabled = true; button.textContent = 'Сопоставляем…';
+    const form = new FormData(); form.append('file', state.file);
+    try {
+      const d = await api('/api/recognize', {method: 'POST', body: form});
+      if (d.recognized) {
+        const o = d.object, pct = (d.confidence * 100).toFixed(1);
+        $('#result').innerHTML = `<div class="result"><div class="meta">${icon('check')}Место распознано</div><h3>${esc(o.name)}</h3>
+          <div class="confidence" aria-hidden="true"><i style="width:${pct}%"></i></div><div class="small muted">Уверенность ${pct}%</div>
+          <p>${esc(o.short_description || o.description)}</p><div class="meta">${icon('pin')}${esc(o.municipality)}${o.address ? ' · ' + esc(o.address) : ''}</div>
+          <ul class="facts"><li>${icon('cal')}${esc(o.best_months_label || '—')}</li><li>${icon('clock')}${esc(o.visit_label || '—')}</li></ul>
+          <div class="actions"><button class="btn" data-act="detail" data-id="${o.id}">Подробнее</button>${routeButton(o.id, 'btn ghost')}<button class="btn gold" data-act="ask" data-id="${o.id}">${icon('chat')}Спросить гида</button></div></div>`;
+      } else {
+        const alt = (d.top_matches || []).slice(0, 3).map(m => `<button class="chip" data-act="detail" data-id="${m.object_id}">${esc(m.name)}</button>`).join('');
+        $('#result').innerHTML = `<div class="result"><h3>Не удалось узнать место уверенно</h3><p class="muted">Попробуйте другой ракурс, больше света или снимок без людей на переднем плане.</p>${alt ? `<div class="small muted">Возможно, это:</div><div class="chips">${alt}</div>` : ''}</div>`;
+      }
+    } catch (error) { $('#result').innerHTML = `<div class="notice bad">${icon('alert')}${esc(error.message)}</div>`; }
+    finally { button.disabled = false; button.innerHTML = `${icon('check')}Распознать место`; }
+  });
+
+  /* route calculation */
+  $('#clearRoute').addEventListener('click', () => { state.routeIds = []; store.set('route', []); renderStops(); renderCards(); $('#routeResult').innerHTML = '<div class="result-empty">Результат расчёта появится здесь.</div>'; });
+  $('#calcRoute').addEventListener('click', async () => {
+    const body = {travel_mode: state.mode};
+    const available = parseInt($('#available').value, 10); if (available >= 15) body.available_minutes = available;
+    if (state.routeIds.length) body.object_ids = state.routeIds;
+    else { body.latitude = +$('#lat').value; body.longitude = +$('#lon').value; body.limit = Math.min(20, Math.max(1, +$('#limit').value || 6)); }
+    $('#routeResult').innerHTML = '<p class="muted">Считаем…</p>';
+    try {
+      const d = await api('/api/plan-route', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+      const s = d.summary, remote = s.has_remote_objects;
+      const range = r => r.min === r.max ? fmtMin(r.min) : `${fmtMin(r.min)} – ${fmtMin(r.max)}`;
+      $('#routeResult').innerHTML = `
+        <h2>${d.travel_mode === 'walk' ? 'Пешая прогулка' : 'Поездка на автомобиле'} · ${s.stops} ${s.stops === 1 ? 'место' : 'мест'}</h2>
+        <div class="stats"><div class="stat"><small>В пути</small><b>${remote ? range(s.travel_minutes_range) : fmtMin(s.travel_minutes)}</b><small>≈ ${esc(s.estimated_road_km)} км</small></div>
+          <div class="stat"><small>На осмотр</small><b>${fmtMin(s.visit_minutes)}</b><small>${range(s.visit_minutes_range)}</small></div>
+          <div class="stat total"><small>Итого</small><b>${remote ? range(s.total_minutes_range) : fmtMin(s.total_minutes)}</b><small>${s.available_minutes ? (s.fits_available_time ? 'укладывается в ваше время' : 'не укладывается') : 'ориентировочно'}</small></div></div>
+        ${(d.warnings || []).map(w => `<div class="notice">${icon('alert')}<span>${esc(w)}</span></div>`).join('')}
+        <ol class="timeline">${d.route.map(item => { const leg = item.leg; const t = leg ? (leg.is_range ? range(leg.travel_minutes_range) : fmtMin(leg.travel_minutes)) : ''; return `<li><span class="num">${item.order}</span>
+          ${leg ? `<p class="leg">${icon(leg.mode === 'walk' ? 'walk' : 'car')}${esc(leg.estimated_road_km)} км · ~${t}</p>` : '<p class="leg">Старт маршрута</p>'}
+          <div class="stop-card"><b>${esc(item.name)}</b><div class="small muted">Осмотр ~${fmtMin(item.visit_minutes.planned)} · прибытие через ${fmtMin(item.arrival_after_minutes)}</div><div class="actions" style="margin-top:6px"><button class="btn ghost sm" data-act="detail" data-id="${item.id}">Подробнее</button></div></div></li>`; }).join('')}</ol>
+        <p class="small muted">${esc(d.estimation.description)}</p>
+        <div class="actions"><button class="btn gold" id="askRoute">${icon('chat')}Спросить гида о маршруте</button></div>`;
+      $('#askRoute').addEventListener('click', () => { if (!state.routeIds.length) { state.routeIds = d.route.map(i => i.id); store.set('route', state.routeIds); renderStops(); renderCards(); } openGuide(null); sendQuestion('Сколько времени займёт мой маршрут и что взять с собой?'); });
+    } catch (error) { $('#routeResult').innerHTML = `<div class="notice bad">${icon('alert')}${esc(error.message)}</div>`; }
+  });
+
+  /* guide */
+  const chatEl = $('#chat'), input = $('#guideInput');
+  function renderContext() {
+    const o = state.guideObject && state.byId.get(state.guideObject);
+    $('#guideContext').innerHTML = o ? `<span class="context"><span>О месте: ${esc(o.name)}</span><button type="button" id="dropContext" aria-label="Убрать контекст">${icon('close')}</button></span>`
+      : state.routeIds.length ? `<span class="context"><span>Учитываю маршрут: ${state.routeIds.length} мест</span></span>` : '';
+    const drop = $('#dropContext'); if (drop) drop.addEventListener('click', () => { state.guideObject = null; renderContext(); });
+  }
+  function bubble(turn) {
+    if (turn.role === 'user') return `<div class="bubble user">${esc(turn.content)}</div>`;
+    const meta = turn.meta || {};
+    const sources = (meta.sources || []).map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a>`).join('');
+    const warns = (meta.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('');
+    const label = meta.mode === 'local_llm' ? 'локальная модель' : 'ответ из базы знаний';
+    return `<div class="bubble bot">${esc(turn.content)}${warns}<div class="foot">${esc(label)}${meta.grounded === false ? ' · нет подтверждения в базе' : ''}${sources ? '<br>Источники: ' + sources : ''}</div></div>`;
+  }
+  function renderChat(suggestions) {
+    const intro = state.chat.length ? '' : `<div class="bubble bot">Здравствуйте! Я локальный гид по Хабаровскому краю. Расскажу об истории мест, сезоне, экипировке и времени поездки — только по проверенной базе.</div>`;
+    const chips = (suggestions || (state.chat.length ? (state.chat[state.chat.length - 1].meta || {}).suggested_questions : ['Что посмотреть в Хабаровске за один день?', 'Когда цветут лотосы у Галкино?', 'Что взять с собой на петроглифы Сикачи-Аляна?']) || []);
+    chatEl.innerHTML = intro + state.chat.map(bubble).join('') + (chips.length ? `<div class="chips">${chips.map(q => `<button class="chip" data-act="question" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : '');
+    chatEl.parentElement.scrollTop = chatEl.parentElement.scrollHeight;
+  }
+  async function refreshGuideMode() {
+    try { const s = await api('/api/assistant/status'); const m = $('#guideMode'); m.classList.toggle('on', !!s.llm_available); m.innerHTML = `<span class="dot"></span><span class="mode-text">${s.llm_available ? 'локальная модель' : 'резервный режим'}</span>`; m.title = s.llm_available ? `Локальная модель ${s.model}` : 'Резервный режим: ответы из базы знаний'; }
+    catch { $('#guideMode').innerHTML = '<span class="dot"></span><span class="mode-text">недоступен</span>'; }
+  }
+  function openGuide(objectId) {
+    state.guideObject = objectId || null; renderContext(); renderChat(); refreshGuideMode(); openDrawer($('#guide'));
+  }
+  async function sendQuestion(text) {
+    text = String(text || '').trim().slice(0, 1000); if (!text) return;
+    const history = state.chat.slice(-8).map(t => ({role: t.role, content: t.content.slice(0, 2000)}));
+    state.chat.push({role: 'user', content: text}); renderChat([]);
+    chatEl.insertAdjacentHTML('beforeend', '<div class="typing" id="typing">Гид печатает…</div>');
+    $('#guideSend').disabled = true;
+    try {
+      const d = await api('/api/assistant/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: text, object_id: state.guideObject, route_object_ids: state.routeIds, travel_mode: state.mode, history})});
+      state.chat.push({role: 'assistant', content: d.answer, meta: {mode: d.mode, grounded: d.grounded, sources: d.sources, warnings: d.warnings, suggested_questions: d.suggested_questions}});
+    } catch (error) {
+      state.chat.push({role: 'assistant', content: error.message, meta: {mode: 'fallback', grounded: false, warnings: []}});
+    } finally {
+      state.chat = state.chat.slice(-20); store.set('chat', state.chat); $('#guideSend').disabled = false; renderChat();
+    }
+  }
+  $('#guideForm').addEventListener('submit', e => { e.preventDefault(); const v = input.value; input.value = ''; updateCounter(); sendQuestion(v); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#guideForm').requestSubmit(); } });
+  const updateCounter = () => { $('#guideCounter').textContent = `${input.value.length} / 1000 · гид отвечает только по локальной базе знаний`; input.style.height = 'auto'; input.style.height = Math.min(140, input.scrollHeight) + 'px'; };
+  input.addEventListener('input', updateCounter);
+  $('#clearChat').addEventListener('click', () => { state.chat = []; store.set('chat', []); renderChat(); });
+  $('#openGuide').addEventListener('click', () => openGuide(null));
+  $('#fabGuide').addEventListener('click', () => openGuide(null));
+
+  /* health */
+  api('/health').then(d => {
+    const ok = d.index_ready, el = $('#status');
+    el.querySelector('.dot').style.background = ok ? 'var(--ok)' : 'var(--warn)';
+    el.lastElementChild.textContent = ok ? `Система готова · база знаний ${d.knowledge_base.places} мест` : 'Каталог доступен, индекс не готов';
+  }).catch(() => { const el = $('#status'); el.querySelector('.dot').style.background = 'var(--bad)'; el.lastElementChild.textContent = 'Сервер недоступен'; });
+
+  renderStops();
+  // Deep links: #catalog, #route, #guide, #place-29
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (['recognize', 'catalog', 'route'].includes(hash)) showTab(hash);
+  loadCatalog().then(() => {
+    if (/^place-\d+$/.test(hash)) openDetail(+hash.slice(6));
+    else if (hash === 'guide') openGuide(null);
+  });
+})();
+</script>
+</body>
+</html>
