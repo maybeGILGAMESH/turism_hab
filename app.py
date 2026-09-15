@@ -2,23 +2,32 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import math
 import mimetypes
 import secrets
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Literal
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, create_engine, select
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -29,11 +38,15 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+import routing
+from assistant import OllamaClient, RateLimiter, TourGuide
 from build_index import build as build_faiss_index
 from catalog import Attraction, load_catalog, save_catalog
 from data_pipeline import Manifest, assign_splits
+from knowledge import KnowledgeBase
+from place_content import summary as content_summary
 from rag_searcher import IndexNotReady, RAGSearcher
-from settings import ROOT, Settings, get_settings
+from settings import APP_VERSION, ROOT, Settings, get_settings
 
 settings: Settings = get_settings()
 for folder in (
@@ -115,11 +128,21 @@ bootstrap_admin()
 searcher = RAGSearcher(settings)
 index_state: dict[str, object] = {"running": False, "error": "", "finished_at": None}
 index_lock = Lock()
+knowledge_base = KnowledgeBase(settings)
+knowledge_base.ensure_ready()
+ollama = OllamaClient(
+    settings.ollama_base_url,
+    settings.ollama_model,
+    settings.ollama_timeout_seconds,
+    settings.ollama_temperature,
+    settings.ollama_max_tokens,
+)
+assistant_limiter = RateLimiter(settings.assistant_rate_limit_per_minute)
 
 
 app = FastAPI(
     title=settings.app_name,
-    version="2.0.0",
+    version=APP_VERSION,
     description="Распознавание и каталог достопримечательностей Хабаровского края",
 )
 app.add_middleware(
@@ -145,9 +168,41 @@ class UserLogin(BaseModel):
 
 
 class RouteRequest(BaseModel):
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     limit: int = Field(default=10, ge=1, le=20)
+    travel_mode: Literal["walk", "car"] = "walk"
+    object_ids: list[int] | None = Field(default=None, min_length=1, max_length=20)
+    municipality: str | None = Field(default=None, max_length=120)
+    available_minutes: int | None = Field(default=None, ge=15, le=60 * 24 * 30)
+
+    @model_validator(mode="after")
+    def start_or_objects(self) -> RouteRequest:
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude и longitude задаются вместе")
+        if self.latitude is None and not self.object_ids:
+            raise ValueError("укажите координаты старта или object_ids")
+        return self
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class AssistantRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    object_id: int | None = Field(default=None, ge=1)
+    route_object_ids: list[int] = Field(default_factory=list, max_length=20)
+    travel_mode: Literal["walk", "car"] = "walk"
+    history: list[ChatTurn] = Field(default_factory=list, max_length=8)
+
+    @field_validator("message")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("сообщение не должно быть пустым")
+        return value.strip()
 
 
 def get_db():
@@ -245,17 +300,9 @@ def public_object(
     )
     payload["example_images"] = (examples or {}).get(item.id, [])
     payload["image_count"] = len(payload["example_images"])
+    payload.update(content_summary(knowledge_base.cards.get(item.id)))
     return payload
 
-
-def haversine(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
-    radius = 6371.0
-    dlat, dlon = math.radians(b_lat - a_lat), math.radians(b_lon - a_lon)
-    value = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(a_lat)) * math.cos(math.radians(b_lat)) * math.sin(dlon / 2) ** 2
-    )
-    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
 
 @app.get("/", include_in_schema=False)
@@ -339,11 +386,27 @@ def history(user: User = Depends(require_user), db: Session = Depends(get_db)):
 
 @app.get("/api/objects")
 def get_objects():
+    knowledge_base.ensure_ready()
     examples = examples_by_object()
     return {
         "success": True,
         "objects": [public_object(item, examples) for item in catalog_map().values()],
     }
+
+
+@app.get("/api/objects/{object_id}")
+def get_object(object_id: int):
+    knowledge_base.ensure_ready()
+    item = catalog_map().get(object_id)
+    if item is None:
+        raise HTTPException(404, "Объект не найден")
+    payload = public_object(item, examples_by_object())
+    card = knowledge_base.cards.get(object_id)
+    if card:
+        payload.update(card)
+    payload["content_available"] = card is not None
+    payload["knowledge_base_version"] = knowledge_base.version
+    return {"success": True, "object": payload}
 
 
 @app.post("/api/recognize")
@@ -408,32 +471,128 @@ async def recognize(
     return payload
 
 
-@app.post("/api/plan-route")
-def plan_route(request: RouteRequest):
-    remaining = [
-        item
-        for item in catalog_map().values()
-        if item.latitude is not None and item.longitude is not None
-    ]
-    route = []
-    current_lat, current_lon = request.latitude, request.longitude
-    total = 0.0
-    while remaining and len(route) < request.limit:
-        nearest = min(
-            remaining,
-            key=lambda item: haversine(current_lat, current_lon, item.latitude, item.longitude),
+def route_places() -> list[routing.Place]:
+    places = []
+    for item in catalog_map().values():
+        if item.latitude is None or item.longitude is None:
+            continue
+        card = knowledge_base.cards.get(item.id, {})
+        visit = card.get("visit_minutes") or {"min": 30, "max": 60}
+        places.append(
+            routing.Place(
+                id=item.id,
+                name=item.name,
+                latitude=item.latitude,
+                longitude=item.longitude,
+                municipality=item.municipality,
+                trip_profile=str(card.get("trip_profile", "urban")),
+                visit_min=int(visit["min"]),
+                visit_max=int(visit["max"]),
+            )
         )
-        distance = haversine(current_lat, current_lon, nearest.latitude, nearest.longitude)
-        route.append({**public_object(nearest), "distance_from_previous_km": round(distance, 2)})
-        total += distance
-        current_lat, current_lon = nearest.latitude, nearest.longitude
-        remaining.remove(nearest)
+    return places
+
+
+def build_route(request: RouteRequest) -> dict[str, object]:
+    knowledge_base.ensure_ready()
+    start = (request.latitude, request.longitude) if request.latitude is not None else None
+    plan = routing.plan_route(
+        route_places(),
+        start=start,
+        travel_mode=request.travel_mode,
+        limit=request.limit,
+        object_ids=request.object_ids,
+        municipality=request.municipality,
+        available_minutes=request.available_minutes,
+    )
+    catalog, examples = catalog_map(), examples_by_object()
+    route = []
+    for order, stop in enumerate(plan["stops"], 1):
+        leg = stop["leg"]
+        route.append(
+            {
+                **public_object(catalog[int(stop["object_id"])], examples),
+                "order": order,
+                "distance_from_previous_km": leg["distance_km"] if leg else 0.0,
+                "leg": leg,
+                "visit_minutes": stop["visit_minutes"],
+                "arrival_after_minutes": stop["arrival_after_minutes"],
+            }
+        )
     return {
         "success": bool(route),
-        "start": request.model_dump(exclude={"limit"}),
+        "start": {"latitude": start[0], "longitude": start[1]} if start else None,
         "route": route,
-        "total_distance_km": round(total, 2),
+        "total_distance_km": plan["summary"]["distance_km"],
+        "travel_mode": request.travel_mode,
+        "summary": plan["summary"],
+        "warnings": plan["warnings"],
+        "skipped_object_ids": plan["skipped_object_ids"],
+        "estimation": plan["estimation"],
     }
+
+
+@app.post("/api/plan-route")
+def plan_route(request: RouteRequest):
+    return build_route(request)
+
+
+def assistant_route(
+    object_ids: list[int] | None, travel_mode: str, municipality: str | None
+) -> dict[str, object] | None:
+    if object_ids:
+        return build_route(RouteRequest(object_ids=object_ids, travel_mode=travel_mode))
+    urban = [
+        place
+        for place in route_places()
+        if place.municipality == municipality and place.trip_profile == "urban"
+    ]
+    if not urban:
+        return None
+    # Start from the medoid: the city place closest to all others (usually the historic centre).
+    center = min(
+        urban,
+        key=lambda place: sum(
+            routing.haversine_km(place.latitude, place.longitude, other.latitude, other.longitude)
+            for other in urban
+        ),
+    )
+    return build_route(
+        RouteRequest(
+            latitude=center.latitude,
+            longitude=center.longitude,
+            municipality=municipality,
+            travel_mode=travel_mode,
+            limit=5,
+        )
+    )
+
+
+guide = TourGuide(knowledge_base, ollama, assistant_route, enabled=settings.assistant_enabled)
+
+
+@app.post("/api/assistant/chat")
+def assistant_chat(payload: AssistantRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = assistant_limiter.check(client_ip)
+    if not allowed:
+        raise HTTPException(
+            429,
+            "Слишком много вопросов подряд. Попробуйте через минуту.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    return guide.answer(
+        payload.message,
+        object_id=payload.object_id,
+        route_object_ids=payload.route_object_ids,
+        travel_mode=payload.travel_mode,
+        history=[turn.model_dump() for turn in payload.history],
+    )
+
+
+@app.get("/api/assistant/status")
+def assistant_status():
+    return guide.status()
 
 
 @app.post("/api/objects", dependencies=[Depends(require_admin)])
@@ -582,6 +741,11 @@ def stats(db: Session = Depends(get_db)):
         "index_ready": searcher.ready,
         "index_state": index_state,
         "model": f"{settings.model_name}:{settings.model_pretrained}",
+        "knowledge_base": {
+            "ready": knowledge_base.ready,
+            "version": knowledge_base.version,
+            "places": len(knowledge_base.cards),
+        },
     }
 
 
@@ -607,13 +771,25 @@ def health():
         },
         "index_version": str(searcher.metadata.get("manifest_sha256", ""))[:12],
         "index_state": index_state,
+        "version": APP_VERSION,
+        "knowledge_base": {
+            "ready": knowledge_base.ready,
+            "version": knowledge_base.version,
+            "places": len(knowledge_base.cards),
+            "error": knowledge_base.error,
+        },
+        "assistant": {
+            "enabled": settings.assistant_enabled,
+            "model": settings.ollama_model,
+            "llm_available": ollama.available(),
+        },
     }
 
 
 def run() -> None:
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("app:app", host="0.0.0.0", port=settings.api_port, reload=False)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,8 @@ ENV PATH="/app/.venv/bin:${PATH}"
 
 COPY *.py ./
 COPY catalog ./catalog
+COPY content ./content
+COPY .streamlit ./.streamlit
 COPY static ./static
 
 RUN mkdir -p dataset/processed artifacts/model_cache runtime uploads

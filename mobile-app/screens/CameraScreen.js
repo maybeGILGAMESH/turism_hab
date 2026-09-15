@@ -1,107 +1,63 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import NetInfo from '@react-native-community/netinfo';
+import { Button, Card, Chip, Icon, Notice } from '../components/ui';
+import { useAppState } from '../context/AppState';
 import { RequestQueue } from '../services/RequestQueue';
 import { StorageService } from '../services/StorageService';
+import { colors, radius, spacing, type } from '../theme';
 
-export default function CameraScreen({ isConnected, apiUrl: defaultApiUrl, onQueueUpdate }) {
+export default function CameraScreen({ navigation, isConnected, apiUrl: defaultApiUrl, onQueueUpdate }) {
+  const { routeIds, toggleRoute } = useAppState();
   const [image, setImage] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiUrl, setApiUrl] = useState(defaultApiUrl);
 
   useEffect(() => {
-    // Загружаем сохраненный URL сервера из настроек
-    const loadApiUrl = async () => {
-      try {
-        const settings = await StorageService.getSettings();
-        if (settings.serverUrl) {
-          setApiUrl(settings.serverUrl);
-        }
-      } catch (error) {
-        console.error('Error loading API URL:', error);
-      }
-    };
-    loadApiUrl();
-  }, []);
+    StorageService.getSettings().then(settings => setApiUrl(settings.serverUrl || defaultApiUrl));
+  }, [defaultApiUrl]);
 
-  const pickImage = async () => {
-    // Запрашиваем разрешение на доступ к камере/галерее
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Ошибка', 'Необходимо разрешение на доступ к галерее');
-      return;
-    }
-
-    // Открываем галерею
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
+  const choose = picked => {
+    if (!picked.canceled) {
+      setImage(picked.assets[0].uri);
       setResult(null);
     }
+  };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Нет доступа', 'Разрешите доступ к галерее в настройках устройства.');
+      return;
+    }
+    choose(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.8 }));
   };
 
   const takePhoto = async () => {
-    // Запрашиваем разрешение на доступ к камере
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Ошибка', 'Необходимо разрешение на доступ к камере');
+      Alert.alert('Нет доступа', 'Разрешите доступ к камере в настройках устройства.');
       return;
     }
+    choose(await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [4, 3], quality: 0.8 }));
+  };
 
-    // Открываем камеру
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-      setResult(null);
-    }
+  const enqueue = async () => {
+    await RequestQueue.addToQueue({ type: 'recognize', imageUri: image, data: {} });
+    onQueueUpdate();
   };
 
   const recognizeImage = async () => {
-    if (!image) {
-      Alert.alert('Ошибка', 'Пожалуйста, выберите изображение');
-      return;
-    }
-
+    if (!image) return;
     setLoading(true);
     setResult(null);
-
-    const isConnectedNow = await NetInfo.fetch().then(state => state.isConnected);
-
-    if (!isConnectedNow) {
-      // Нет интернета - сохраняем в очередь
+    const online = await NetInfo.fetch().then(state => state.isConnected);
+    if (!online) {
       try {
-        await RequestQueue.addToQueue({
-          type: 'recognize',
-          imageUri: image,
-          data: {},
-        });
-        Alert.alert(
-          'Офлайн режим',
-          'Изображение добавлено в очередь. Распознавание будет выполнено при наличии интернета.',
-          [{ text: 'OK', onPress: () => onQueueUpdate() }]
-        );
+        await enqueue();
+        Alert.alert('Офлайн-режим', 'Фото добавлено в очередь и будет распознано, когда появится сеть.');
       } catch (error) {
         Alert.alert('Ошибка', 'Не удалось добавить запрос в очередь');
       }
@@ -109,323 +65,130 @@ export default function CameraScreen({ isConnected, apiUrl: defaultApiUrl, onQue
       return;
     }
 
-    // Есть интернет - отправляем запрос сразу
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      console.log('📤 Starting recognition request to:', `${apiUrl}/api/recognize`);
-      console.log('📷 Image URI:', image);
-      
-      // Проверяем доступность сервера (опционально)
-      try {
-        const healthController = new AbortController();
-        const healthTimeout = setTimeout(() => healthController.abort(), 5000);
-        const healthCheck = await fetch(`${apiUrl}/health`, {
-          method: 'GET',
-          signal: healthController.signal,
-        });
-        clearTimeout(healthTimeout);
-        if (!healthCheck.ok) {
-          console.warn('⚠️ Server health check failed, but continuing...');
-        } else {
-          console.log('✅ Server is healthy');
-        }
-      } catch (healthError) {
-        console.warn('⚠️ Could not check server health:', healthError.message);
-        // Продолжаем запрос, даже если health check не прошел
-      }
-      
       const formData = new FormData();
-      formData.append('file', {
-        uri: image,
-        type: 'image/jpeg',
-        name: 'photo.jpg',
-      });
-
-      console.log('📋 FormData created, sending request...');
-
-      // Создаем AbortController для таймаута
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 секунд таймаут
-
-      try {
-        const response = await fetch(`${apiUrl}/api/recognize`, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-          // НЕ устанавливаем Content-Type вручную - браузер/React Native установит его автоматически
-          // с правильным boundary для multipart/form-data
-        });
-
-        clearTimeout(timeoutId);
-
-        console.log('📥 Response received, status:', response.status);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ HTTP error:', response.status, errorText);
-          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-
-        const recognitionResult = await response.json();
-        console.log('✅ Recognition result:', recognitionResult);
-        setResult(recognitionResult);
-
-        // Сохраняем результат в историю
-        await StorageService.saveRecognition({
-          ...recognitionResult,
-          imageUri: image,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          console.error('⏱️ Request timeout after 60 seconds');
-          throw new Error('Превышено время ожидания ответа (60 секунд). Сервер обрабатывает запрос слишком долго.');
-        }
-        throw fetchError;
+      if (image.startsWith('blob:') || image.startsWith('data:')) {
+        const blob = await (await fetch(image)).blob();
+        formData.append('file', blob, 'photo.jpg');
+      } else {
+        formData.append('file', { uri: image, type: 'image/jpeg', name: 'photo.jpg' });
       }
+      const response = await fetch(`${apiUrl}/api/recognize`, { method: 'POST', body: formData, signal: controller.signal });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Сервер ответил ${response.status}: ${text.slice(0, 160)}`);
+      }
+      const recognition = await response.json();
+      setResult(recognition);
+      await StorageService.saveRecognition({ ...recognition, imageUri: image, timestamp: new Date().toISOString() });
     } catch (error) {
-      console.error('❌ Recognition error:', error);
-      console.error('Error details:', {
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      });
-      
-      const errorMessage = error.message || 'Не удалось распознать изображение';
-      Alert.alert(
-        'Ошибка',
-        errorMessage + '\n\nПопробуйте еще раз или добавьте в очередь для обработки позже.'
-      );
-      
-      // Если ошибка, тоже добавляем в очередь для повторной попытки
+      const message = error.name === 'AbortError' ? 'Сервер не ответил за 60 секунд.' : error.message || 'Не удалось распознать изображение';
+      Alert.alert('Ошибка', `${message}\n\nЗапрос добавлен в очередь для повторной попытки.`);
       try {
-        await RequestQueue.addToQueue({
-          type: 'recognize',
-          imageUri: image,
-          data: {},
-        });
-        onQueueUpdate();
+        await enqueue();
       } catch (queueError) {
         console.error('Error adding to queue:', queueError);
       }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
 
-  return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>🌊 Открой Хабаровский край</Text>
-        <Text style={styles.subtitle}>Узнайте место по фотографии</Text>
-        <Text style={styles.organization}>Ваш AI-гид по Дальнему Востоку</Text>
-        {!isConnected && (
-          <View style={styles.offlineBanner}>
-            <Text style={styles.offlineText}>⚠️ Офлайн режим</Text>
-          </View>
-        )}
-      </View>
+  const place = result && result.recognized ? result.object : null;
+  const inRoute = place && routeIds.includes(place.id);
 
-      <View style={styles.imageContainer}>
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {!isConnected && <Notice tone="warn" icon="wifi-off">Нет сети — фото попадут в очередь и распознаются позже.</Notice>}
+      <Text style={type.small}>Сфотографируйте достопримечательность — узнаем место и расскажем о нём.</Text>
+
+      <Card style={styles.imageCard}>
         {image ? (
-          <Image source={{ uri: image }} style={styles.image} />
+          <Image source={{ uri: image }} style={styles.image} accessibilityLabel="Выбранная фотография" />
         ) : (
           <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>Выберите изображение</Text>
+            <View style={styles.placeholderIcon}><Icon name="image-search-outline" size={34} color={colors.amur} /></View>
+            <Text style={type.h3}>Фото пока не выбрано</Text>
+            <Text style={[type.small, styles.center]}>Лучше всего работают снимки фасада целиком при дневном свете.</Text>
           </View>
         )}
+      </Card>
+
+      <View style={styles.row}>
+        <Button title="Камера" icon="camera-outline" onPress={takePhoto} style={styles.flex} />
+        <Button title="Галерея" icon="image-multiple-outline" variant="ghost" onPress={pickImage} style={styles.flex} />
       </View>
-
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.button} onPress={pickImage}>
-          <Text style={styles.buttonText}>📁 Выбрать из галереи</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.button} onPress={takePhoto}>
-          <Text style={styles.buttonText}>📷 Сделать фото</Text>
-        </TouchableOpacity>
-
-        {image && (
-          <TouchableOpacity
-            style={[styles.button, styles.recognizeButton, loading && styles.buttonDisabled]}
-            onPress={recognizeImage}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>🔍 Распознать</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {result && (
-        <View style={styles.resultContainer}>
-          <Text style={styles.resultTitle}>Результаты распознавания</Text>
-          {result.success ? (
-            <View style={styles.successResult}>
-              <Text style={styles.successText}>✅ Достопримечательность распознана!</Text>
-              <Text style={styles.resultLabel}>ID объекта:</Text>
-              <Text style={styles.resultValue}>{result.object_id}</Text>
-              <Text style={styles.resultLabel}>Уверенность:</Text>
-              <Text style={styles.resultValue}>
-                {(result.confidence * 100).toFixed(1)}%
-              </Text>
-              <Text style={styles.resultLabel}>Описание:</Text>
-              <Text style={styles.resultDescription}>{result.description}</Text>
-            </View>
-          ) : (
-            <View style={styles.errorResult}>
-              <Text style={styles.errorText}>⚠️ Достопримечательность не распознана</Text>
-              <Text style={styles.resultDescription}>{result.message}</Text>
-            </View>
-          )}
+      {image ? (
+        <Button
+          title={loading ? 'Сопоставляем…' : 'Распознать место'}
+          icon="magnify-scan"
+          variant="gold"
+          onPress={recognizeImage}
+          loading={loading}
+        />
+      ) : null}
+      {loading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color={colors.amur} />
+          <Text style={type.small}>Сравниваем фото с коллекцией мест края…</Text>
         </View>
-      )}
+      ) : null}
+
+      {result && place ? (
+        <Card style={styles.resultCard}>
+          <Chip icon="check-circle-outline" label="Место распознано" tone="ok" />
+          <Text style={type.title}>{place.name}</Text>
+          <View style={styles.confidenceTrack}><View style={[styles.confidenceFill, { width: `${Math.round(result.confidence * 100)}%` }]} /></View>
+          <Text style={type.small}>Уверенность {(result.confidence * 100).toFixed(1)}%</Text>
+          <Text style={type.body}>{place.short_description || place.description}</Text>
+          <View style={styles.chips}>
+            <Chip icon="map-marker-outline" label={place.municipality} />
+            {place.best_months_label ? <Chip icon="calendar-month-outline" label={place.best_months_label} /> : null}
+            {place.visit_label ? <Chip icon="clock-outline" label={place.visit_label} tone="gold" /> : null}
+          </View>
+          <Button title="Подробнее о месте" icon="book-open-page-variant-outline" onPress={() => navigation.navigate('PlaceDetail', { id: place.id, name: place.name })} />
+          <View style={styles.row}>
+            <Button compact title={inRoute ? 'В маршруте' : 'В маршрут'} icon={inRoute ? 'check' : 'map-marker-plus-outline'} variant="ghost" onPress={() => toggleRoute(place.id)} style={styles.flex} />
+            <Button compact title="Спросить гида" icon="robot-happy-outline" variant="gold" onPress={() => navigation.navigate('Guide', { objectId: place.id })} style={styles.flex} />
+          </View>
+        </Card>
+      ) : null}
+
+      {result && !place ? (
+        <Card style={styles.resultCard}>
+          <Notice tone="warn">Не удалось узнать место уверенно. Попробуйте другой ракурс или больше света.</Notice>
+          {result.top_matches && result.top_matches.length ? (
+            <>
+              <Text style={type.label}>Возможно, это:</Text>
+              <View style={styles.chips}>
+                {result.top_matches.slice(0, 3).map(match => (
+                  <Chip key={match.object_id} tone="white" label={match.name} onPress={() => navigation.navigate('PlaceDetail', { id: match.object_id, name: match.name })} />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </Card>
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: '#075985',
-    padding: 20,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 5,
-  },
-  organization: {
-    fontSize: 12,
-    color: '#fff',
-    opacity: 0.9,
-  },
-  offlineBanner: {
-    marginTop: 10,
-    backgroundColor: '#f39c12',
-    padding: 8,
-    borderRadius: 5,
-  },
-  offlineText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  imageContainer: {
-    margin: 20,
-    height: 300,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: 16,
-    color: '#999',
-  },
-  buttonContainer: {
-    padding: 20,
-  },
-  button: {
-    backgroundColor: '#0369a1',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  recognizeButton: {
-    backgroundColor: '#27ae60',
-    marginTop: 10,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  resultContainer: {
-    margin: 20,
-    padding: 15,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  resultTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#2c3e50',
-  },
-  successResult: {
-    padding: 10,
-    backgroundColor: '#d4edda',
-    borderRadius: 5,
-  },
-  successText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#155724',
-    marginBottom: 10,
-  },
-  errorResult: {
-    padding: 10,
-    backgroundColor: '#f8d7da',
-    borderRadius: 5,
-  },
-  errorText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#721c24',
-    marginBottom: 10,
-  },
-  resultLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginTop: 10,
-  },
-  resultValue: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-  },
-  resultDescription: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginTop: 5,
-  },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  imageCard: { aspectRatio: 4 / 3, width: '100%', maxHeight: 360 },
+  image: { width: '100%', height: '100%', resizeMode: 'cover' },
+  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.sm, backgroundColor: colors.sky },
+  placeholderIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  center: { textAlign: 'center' },
+  row: { flexDirection: 'row', gap: spacing.sm },
+  flex: { flex: 1 },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, justifyContent: 'center' },
+  resultCard: { padding: spacing.lg, gap: spacing.sm },
+  confidenceTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.sky, overflow: 'hidden' },
+  confidenceFill: { height: '100%', backgroundColor: colors.ok },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 });

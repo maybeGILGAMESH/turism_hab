@@ -1,0 +1,18 @@
+{
+  "source": "backups/turism_hab_v2.0.0_2026-09-14.sha256.csv (manifest fingerprint 2ae588ac884850ee80bea686604c3ac8f7e153933dcf94103b8d3bccc1e63139)",
+  "git_tag": "v2.0.0-demo-stable",
+  "files": {
+    "catalog/objects.json": "b9221e38916fbe46942733cffe26d71e3f360783282ff874571aac963a62105a",
+    "dataset/manifest.csv": "84e3f26ecaaaf99313984192f021225c67ed55b24364679ed248d1853b0c6637",
+    "artifacts/index.faiss": "a41a2e51a911a00bdd3a8066368f244d723c346639806947875424966e98b857",
+    "artifacts/index_metadata.json": "cf587a207198895122dff21e8c690053b7844a86c8549037f596420d3399b8a2",
+    "artifacts/model_cache/ViT-B-16.pt": "5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f"
+  },
+  "aggregates": {
+    "dataset/processed": {
+      "files": 612,
+      "aggregate_sha256": "529e9e7981c1acb02f772aa65c72d14c91c479bd830ab1c89f841d64bc3e49d9",
+      "method": "sha256 over sorted 'relative_path,size,sha256' lines"
+    }
+  }
+}

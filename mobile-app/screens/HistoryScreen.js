@@ -1,32 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  Alert,
-  RefreshControl,
-} from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Alert, FlatList, Image, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { Button, Card, Chip, EmptyState, IconButton } from '../components/ui';
 import { StorageService } from '../services/StorageService';
+import { colors, spacing, type } from '../theme';
 
-export default function HistoryScreen() {
+export default function HistoryScreen({ navigation }) {
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadHistory();
+  const loadHistory = useCallback(async () => {
+    setHistory(await StorageService.getHistory());
   }, []);
 
-  const loadHistory = async () => {
-    try {
-      const h = await StorageService.getHistory();
-      setHistory(h);
-    } catch (error) {
-      console.error('Error loading history:', error);
-    }
-  };
+  useFocusEffect(useCallback(() => { loadHistory(); }, [loadHistory]));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -34,221 +21,80 @@ export default function HistoryScreen() {
     setRefreshing(false);
   };
 
-  const deleteItem = async (itemId) => {
-    Alert.alert(
-      'Удаление',
-      'Вы уверены, что хотите удалить эту запись?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Удалить',
-          style: 'destructive',
-          onPress: async () => {
-            await StorageService.deleteFromHistory(itemId);
-            loadHistory();
-          },
-        },
-      ]
-    );
+  const deleteItem = itemId => {
+    Alert.alert('Удаление', 'Удалить эту запись?', [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Удалить', style: 'destructive', onPress: async () => { await StorageService.deleteFromHistory(itemId); loadHistory(); } },
+    ]);
   };
 
   const clearHistory = () => {
-    Alert.alert(
-      'Очистка истории',
-      'Вы уверены, что хотите очистить всю историю?',
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Очистить',
-          style: 'destructive',
-          onPress: async () => {
-            await StorageService.clearHistory();
-            loadHistory();
-          },
-        },
-      ]
+    Alert.alert('Очистка истории', 'Удалить всю историю распознаваний?', [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Очистить', style: 'destructive', onPress: async () => { await StorageService.clearHistory(); loadHistory(); } },
+    ]);
+  };
+
+  const renderItem = ({ item }) => {
+    const place = item.object;
+    const recognized = item.success || item.recognized;
+    return (
+      <Card
+        style={styles.item}
+        onPress={place ? () => navigation.navigate('PlaceDetail', { id: place.id, name: place.name }) : undefined}
+        accessibilityLabel={place ? `${place.name}, открыть карточку` : undefined}
+      >
+        {item.imageUri ? <Image source={{ uri: item.imageUri }} style={styles.thumb} /> : <View style={[styles.thumb, styles.thumbEmpty]} />}
+        <View style={styles.body}>
+          {recognized ? (
+            <>
+              <Chip icon="check-circle-outline" tone="ok" label={`Уверенность ${(item.confidence * 100).toFixed(0)}%`} />
+              <Text style={type.h3} numberOfLines={2}>{place ? place.name : `Объект #${item.object_id}`}</Text>
+            </>
+          ) : (
+            <>
+              <Chip icon="help-circle-outline" tone="gold" label="Не распознано" />
+              <Text style={type.small} numberOfLines={2}>{item.message || 'Попробуйте другой ракурс'}</Text>
+            </>
+          )}
+          <Text style={type.small}>{new Date(item.timestamp).toLocaleString('ru-RU')}</Text>
+        </View>
+        <IconButton icon="delete-outline" label="Удалить запись" color={colors.muted} onPress={() => deleteItem(item.id)} />
+      </Card>
     );
   };
 
-  const renderItem = ({ item }) => (
-    <View style={styles.item}>
-      {item.imageUri && (
-        <Image source={{ uri: item.imageUri }} style={styles.itemImage} />
-      )}
-      <View style={styles.itemContent}>
-        {item.success ? (
-          <>
-            <Text style={styles.itemTitle}>
-              ✅ ID: {item.object_id}
-            </Text>
-            <Text style={styles.itemSubtitle}>
-              Уверенность: {(item.confidence * 100).toFixed(1)}%
-            </Text>
-            {item.description && (
-              <Text style={styles.itemDescription} numberOfLines={3}>
-                {item.description}
-              </Text>
-            )}
-          </>
-        ) : (
-          <>
-            <Text style={styles.itemTitleError}>
-              ⚠️ Не распознано
-            </Text>
-            <Text style={styles.itemDescription}>
-              {item.message || 'Достопримечательность не найдена'}
-            </Text>
-          </>
-        )}
-        <Text style={styles.itemDate}>
-          {new Date(item.timestamp).toLocaleString('ru-RU')}
-        </Text>
-      </View>
-      <TouchableOpacity
-        style={styles.deleteButton}
-        onPress={() => deleteItem(item.id)}
-      >
-        <Text style={styles.deleteButtonText}>🗑️</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>📚 Личный кабинет</Text>
-        <Text style={styles.subtitle}>История распознаваний</Text>
-        {history.length > 0 && (
-          <TouchableOpacity style={styles.clearButton} onPress={clearHistory}>
-            <Text style={styles.clearButtonText}>Очистить историю</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {history.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>История пуста</Text>
-          <Text style={styles.emptySubtext}>
-            Распознанные достопримечательности будут отображаться здесь
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={history}
-          renderItem={renderItem}
-          keyExtractor={item => item.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={styles.list}
-        />
-      )}
+      <FlatList
+        data={history}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={[styles.list, !history.length && styles.flexGrow]}
+        ListHeaderComponent={history.length ? (
+          <View style={styles.header}>
+            <Text style={type.label}>Записей: {history.length} · хранится только на устройстве</Text>
+            <Button compact variant="danger" title="Очистить" icon="delete-sweep-outline" onPress={clearHistory} />
+          </View>
+        ) : null}
+        ListEmptyComponent={
+          <EmptyState icon="history" title="История пуста" text="Распознанные достопримечательности появятся здесь.">
+            <Button compact title="Распознать место" icon="camera-outline" onPress={() => navigation.navigate('Camera')} />
+          </EmptyState>
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: '#075985',
-    padding: 20,
-    paddingTop: 40,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 10,
-  },
-  clearButton: {
-    alignSelf: 'flex-end',
-    padding: 8,
-  },
-  clearButtonText: {
-    color: '#fff',
-    fontSize: 14,
-  },
-  list: {
-    padding: 10,
-  },
-  item: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    marginBottom: 10,
-    borderRadius: 10,
-    padding: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  itemImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 5,
-    marginRight: 10,
-  },
-  itemContent: {
-    flex: 1,
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#27ae60',
-    marginBottom: 5,
-  },
-  itemTitleError: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#e74c3c',
-    marginBottom: 5,
-  },
-  itemSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-  },
-  itemDescription: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 5,
-  },
-  itemDate: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 5,
-  },
-  deleteButton: {
-    padding: 5,
-    justifyContent: 'center',
-  },
-  deleteButtonText: {
-    fontSize: 20,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#999',
-    marginBottom: 10,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-  },
+  container: { flex: 1, backgroundColor: colors.bg },
+  list: { padding: spacing.lg, gap: spacing.sm },
+  flexGrow: { flexGrow: 1, justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.xs },
+  item: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, gap: spacing.md, marginBottom: spacing.sm },
+  thumb: { width: 72, height: 72, borderRadius: 10 },
+  thumbEmpty: { backgroundColor: colors.sky },
+  body: { flex: 1, gap: 4 },
 });
