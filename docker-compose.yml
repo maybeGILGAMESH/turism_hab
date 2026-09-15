@@ -1,15 +1,19 @@
-name: discover-khabarovsk-krai
+name: discover-khabarovsk-krai-v3
 
 x-app: &app
-  image: discover-khabarovsk-krai:local
+  image: discover-khabarovsk-krai:v3
   build:
     context: .
   env_file:
     - .env
   environment:
     HF_HUB_DISABLE_XET: "1"
+    OLLAMA_BASE_URL: http://host.docker.internal:11434
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   volumes:
     - ./catalog:/app/catalog
+    - ./content:/app/content:ro
     - ./dataset/processed:/app/dataset/processed:ro
     - ./dataset/manifest.csv:/app/dataset/manifest.csv:ro
     - ./artifacts:/app/artifacts
@@ -22,7 +26,7 @@ services:
     <<: *app
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"
+      - "8100:8000"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 20s
@@ -36,8 +40,9 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       HF_HUB_DISABLE_XET: "1"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     ports:
-      - "8501:8501"
+      - "8601:8501"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
       interval: 20s

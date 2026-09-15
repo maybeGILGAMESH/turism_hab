@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { StorageService } from './StorageService';
 
-const QUEUE_KEY = 'request_queue';
+const QUEUE_KEY = 'v3:request_queue';
 const MAX_RETRIES = 3;
 
 export class RequestQueue {
