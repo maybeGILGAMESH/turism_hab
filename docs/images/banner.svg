@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-label="Открой Хабаровский край">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#073654"/>
+      <stop offset="0.65" stop-color="#0B4F7C"/>
+      <stop offset="1" stop-color="#0E6399"/>
+    </linearGradient>
+    <linearGradient id="river" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#CFE6F3" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#CFE6F3" stop-opacity="0.28"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="340" rx="24" fill="url(#sky)"/>
+  <circle cx="1080" cy="92" r="46" fill="#C8962E" opacity="0.9"/>
+  <path d="M760 250 L860 150 L920 205 L1000 120 L1090 215 L1150 175 L1280 262 L1280 340 L760 340 Z" fill="#073654" opacity="0.55"/>
+  <path d="M880 262 L960 200 L1030 245 L1120 190 L1210 250 L1280 230 L1280 340 L880 340 Z" fill="#052a42" opacity="0.6"/>
+  <path d="M0 270 C160 250 280 292 440 272 S760 246 920 270 S1160 300 1280 280 L1280 340 L0 340 Z" fill="url(#river)"/>
+  <path d="M0 302 C170 286 300 318 470 302 S790 280 960 300 S1170 322 1280 308" fill="none" stroke="#E8F3FA" stroke-opacity="0.35" stroke-width="2"/>
+  <rect x="72" y="70" width="6" height="150" rx="3" fill="#C8962E"/>
+  <text x="100" y="118" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="54" font-weight="700" fill="#FFFFFF">Открой Хабаровский край</text>
+  <text x="102" y="164" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="23" fill="#DCEBF5">Узнайте место по фотографии, прочитайте его историю</text>
+  <text x="102" y="196" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="23" fill="#DCEBF5">и спланируйте маршрут вместе с локальным ИИ-гидом</text>
+  <g font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="600">
+    <rect x="102" y="220" width="148" height="34" rx="17" fill="#FFFFFF" fill-opacity="0.14"/>
+    <text x="176" y="243" text-anchor="middle" fill="#FFFFFF">44 места края</text>
+    <rect x="262" y="220" width="176" height="34" rx="17" fill="#FFFFFF" fill-opacity="0.14"/>
+    <text x="350" y="243" text-anchor="middle" fill="#FFFFFF">CLIP + FAISS офлайн</text>
+    <rect x="450" y="220" width="186" height="34" rx="17" fill="#C8962E"/>
+    <text x="543" y="243" text-anchor="middle" fill="#FFFFFF">Гид без облака</text>
+  </g>
+</svg>
